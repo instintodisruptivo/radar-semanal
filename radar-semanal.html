@@ -30,14 +30,14 @@
   --shadow-md:0 4px 24px rgba(0,0,0,0.10);
 }
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:#F7F7F7}
+html,body{height:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:#fff}
 h1,h2,h3,h4{font-weight:700}
 a{text-decoration:none;color:inherit}
 button{cursor:pointer;font-family:inherit}
 input,textarea,select{font-family:inherit}
 
 /* ─── LAYOUT ─── */
-#app{display:flex;height:100vh;overflow:hidden}
+#app{display:flex;height:100vh;overflow:hidden;background:#fff}
 .sidebar{
   width:var(--sidebar-w);min-width:var(--sidebar-w);
   background:var(--black);
@@ -88,7 +88,7 @@ input,textarea,select{font-family:inherit}
 
 /* ─── MAIN CONTENT ─── */
 .main{flex:1;overflow:auto;display:flex;flex-direction:column}
-.page{display:none;flex:1;padding:28px 32px;animation:fadeIn .25s ease}
+.page{display:none;flex:1;padding:28px 32px;animation:fadeIn .25s ease;background:#fff}
 .page.active{display:flex;flex-direction:column}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
@@ -349,8 +349,8 @@ textarea.form-control{resize:vertical;min-height:80px}
 .success-sub{font-size:15px;color:var(--text2);max-width:360px;line-height:1.6}
 
 /* ─── LOGIN ─── */
-#page-login{background:#F7F7F7;align-items:center;justify-content:center}
-.login-card{background:#fff;border-radius:20px;box-shadow:var(--shadow-md);padding:40px;width:100%;max-width:380px;text-align:center}
+#page-login{background:#ffffff!important;align-items:center;justify-content:center;min-height:100vh;width:100%;position:relative;z-index:1}
+.login-card{background:#ffffff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.12);padding:40px;width:100%;max-width:380px;text-align:center;position:relative;z-index:1}
 .login-logo{width:70px;height:70px;border-radius:50%;background:var(--black);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
 .login-title{font-size:20px;font-weight:800;margin-bottom:4px}
 .login-sub{font-size:13px;color:var(--text2);margin-bottom:24px}
@@ -587,7 +587,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 <div id="app">
 
 <!-- MOBILE TOPBAR -->
-<div class="mobile-topbar" style="display:none;position:fixed;top:0;left:0;right:0;height:56px;background:var(--black);z-index:150;align-items:center;padding:0 16px;gap:12px;border-bottom:2px solid var(--black3)">
+<div class="mobile-topbar" id="mobile-topbar" style="display:none;position:fixed;top:0;left:0;right:0;height:56px;background:var(--black);z-index:150;align-items:center;padding:0 16px;gap:12px;border-bottom:2px solid var(--black3)">
   <button onclick="toggleMobileSidebar()" style="background:none;border:none;color:#fff;padding:4px;display:flex;align-items:center;justify-content:center;cursor:pointer">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
@@ -2606,13 +2606,15 @@ function toggleMobileSidebar(){
   const active = sidebars.find(s => s && s.style.display !== 'none' && s.style.display !== '');
   if(active){
     active.classList.toggle('open');
-    document.querySelector('.mobile-overlay').style.display = active.classList.contains('open') ? 'block' : 'none';
+    const isOpen = active.classList.contains('open');
+    const ov = document.querySelector('.mobile-overlay');
+    if(ov){ov.style.display = isOpen ? 'block' : 'none'; ov.style.pointerEvents = isOpen ? 'auto' : 'none';}
   }
 }
 function closeMobileSidebar(){
   document.querySelectorAll('.sidebar').forEach(s=>s.classList.remove('open'));
   const ov=document.querySelector('.mobile-overlay');
-  if(ov)ov.style.display='none';
+  if(ov){ov.style.display='none';ov.style.pointerEvents='none';}
 }
 function setupMobileTopbar(){
   const topbar=document.querySelector('.mobile-topbar');
