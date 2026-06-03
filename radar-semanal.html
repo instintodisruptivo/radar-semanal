@@ -422,19 +422,153 @@ textarea.form-control{resize:vertical;min-height:80px}
 .donut-legend-pct{font-weight:600;color:var(--text2)}
 
 /* ─── RESPONSIVE ─── */
+
+/* Tablet landscape */
+@media(max-width:1100px){
+  .analysis-grid{grid-template-columns:1fr 1fr}
+  .charts-grid{grid-template-columns:1fr}
+  .charts-grid .chart-card:first-child{grid-column:span 1}
+}
+
+/* Tablet portrait */
 @media(max-width:900px){
   .analysis-grid{grid-template-columns:1fr}
   .questions-grid{grid-template-columns:1fr 1fr}
   .q-card.full-width{grid-column:span 2}
+  .q-card[style*="span 2"]{grid-column:span 2}
   .charts-grid{grid-template-columns:1fr}
   .charts-grid .chart-card:first-child{grid-column:span 1}
+  .page{padding:20px 18px}
+  .tracking-main{padding:20px 18px}
 }
-@media(max-width:640px){
-  .sidebar{display:none}
-  .questions-grid{grid-template-columns:1fr}
-  .q-card.full-width,.q-card.half-width{grid-column:span 1}
+
+/* Mobile — all screens under 768px */
+@media(max-width:768px){
+  /* Hide sidebar on mobile, show hamburger instead */
+  .sidebar{
+    position:fixed;left:-100%;top:0;height:100vh;z-index:200;
+    transition:left .25s ease;width:260px!important;min-width:260px!important;
+  }
+  .sidebar.open{left:0}
+  .mobile-overlay{display:block!important}
+
+  /* Show mobile topbar */
+  .mobile-topbar{display:flex!important}
+
+  /* Main content takes full width */
+  #app{flex-direction:column}
+  .main{width:100%}
+  .page{padding:16px 14px;padding-top:68px}
+
+  /* Tracking page layout */
+  #page-tracking{flex-direction:column}
+  .tracking-sidebar{display:none!important}
+  .tracking-main{padding:16px 14px;padding-top:68px}
+
+  /* Questions: 1 column on mobile */
+  .questions-grid{
+    grid-template-columns:1fr!important;
+    gap:12px;
+  }
+  .q-card{grid-column:span 1!important}
+  .q-card.full-width{grid-column:span 1!important}
+
+  /* Scale buttons smaller */
+  .scale-btn{width:34px;height:34px;font-size:13px}
+  .scale-row{gap:4px}
+
+  /* Radio grid 2 cols on mobile */
+  .radio-grid{grid-template-columns:1fr 1fr!important}
+  .radio-grid.cols2{grid-template-columns:1fr 1fr!important}
+
+  /* Stats row */
+  .stats-row{flex-wrap:wrap;gap:10px}
+  .stat-card{min-width:calc(50% - 5px);flex:none}
+
+  /* Table horizontal scroll */
+  .table-wrap{overflow-x:auto}
+  .table-header,.table-row{
+    grid-template-columns:1.8fr 1fr 1fr 80px 70px;
+    min-width:560px;
+    padding:10px 14px;
+    gap:8px;
+  }
+
+  /* Profile */
+  .profile-header{flex-direction:column;gap:14px}
+  .profile-stats{margin-left:0;flex-direction:row;flex-wrap:wrap}
+  .mini-stat-card{min-width:140px;flex:1}
+
+  /* Metric cards */
+  .metric-cards{flex-wrap:wrap}
+  .metric-card{min-width:calc(50% - 6px);flex:none}
+
+  /* Charts grid */
+  .charts-grid,.dashboard-charts{grid-template-columns:1fr!important}
+  .charts-grid .chart-card:first-child{grid-column:span 1!important}
+
+  /* Analysis grid */
+  .analysis-grid{grid-template-columns:1fr!important}
+
+  /* Profile tabs scrollable */
+  .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
+  .tab{white-space:nowrap;flex-shrink:0;padding:10px 14px;font-size:13px}
+
+  /* Page header */
+  .page-header{flex-direction:column;align-items:flex-start;gap:12px}
+  .header-actions{flex-wrap:wrap;width:100%}
+  .header-actions .btn{flex:1;min-width:120px;justify-content:center}
+  .search-bar{min-width:100%}
+
+  /* Submit button */
+  .submit-btn{min-width:0!important;width:100%;padding:14px 20px;font-size:14px}
+  .submit-row{padding:16px 0}
+
+  /* Register page */
+  .register-wrap{flex-direction:column}
   .register-left{display:none}
-  .register-right{width:100%}
+  .register-right{width:100%;padding:24px 20px;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .register-form-card{padding:28px 20px}
+
+  /* Modal */
+  .modal{padding:24px 18px;margin:10px}
+  .modal-overlay{padding:10px}
+
+  /* Tracking header */
+  .tracking-app-name{font-size:28px}
+  .progress-track{font-size:12px}
+  .progress-track-bar{max-width:120px}
+
+  /* Patient profile section grids */
+  div[style*="grid-template-columns:1.5fr 1fr"]{
+    display:flex!important;flex-direction:column!important;gap:12px!important;
+  }
+  div[style*="grid-template-columns:1fr 1fr 1fr"]{
+    display:flex!important;flex-direction:column!important;gap:12px!important;
+  }
+  div[style*="grid-template-columns:1fr 1fr"]{
+    display:flex!important;flex-direction:column!important;gap:12px!important;
+  }
+
+  /* Login card */
+  .login-card{padding:28px 20px;margin:16px}
+
+  /* Summary recent */
+  .summary-scores{gap:8px}
+  .summary-score{min-width:50px}
+
+  /* Page title */
+  .page-title h2{font-size:20px}
+}
+
+/* Small mobile under 420px */
+@media(max-width:420px){
+  .scale-btn{width:30px;height:30px;font-size:12px}
+  .metric-card{min-width:calc(50% - 6px)}
+  .stat-card{min-width:calc(50% - 5px)}
+  .radio-grid{grid-template-columns:1fr 1fr!important}
+  .page{padding:14px 12px;padding-top:64px}
+  .tracking-main{padding:14px 12px;padding-top:64px}
 }
 
 /* ─── SCROLLBAR ─── */
@@ -451,6 +585,22 @@ textarea.form-control{resize:vertical;min-height:80px}
 <body>
 
 <div id="app">
+
+<!-- MOBILE TOPBAR -->
+<div class="mobile-topbar" style="display:none;position:fixed;top:0;left:0;right:0;height:56px;background:var(--black);z-index:150;align-items:center;padding:0 16px;gap:12px;border-bottom:2px solid var(--black3)">
+  <button onclick="toggleMobileSidebar()" style="background:none;border:none;color:#fff;padding:4px;display:flex;align-items:center;justify-content:center;cursor:pointer">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <img id="mobile-topbar-logo" style="width:36px;height:36px;border-radius:50%;object-fit:cover" src="">
+  <div style="flex:1">
+    <div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px">INSTINTO DISRUPTIVO</div>
+    <div style="font-size:10px;color:var(--red);font-weight:600;letter-spacing:1px">RADAR SEMANAL</div>
+  </div>
+  <div id="mobile-topbar-user" style="font-size:12px;color:var(--gray4)"></div>
+</div>
+
+<!-- MOBILE OVERLAY -->
+<div class="mobile-overlay" onclick="closeMobileSidebar()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:190;backdrop-filter:blur(2px)"></div>
 <!-- ═══════════════ ADMIN SIDEBAR ═══════════════ -->
 <aside class="sidebar" id="admin-sidebar" style="display:none">
   <div class="sidebar-logo">
@@ -1151,22 +1301,39 @@ async function init(){
     }
   }
   showPage('page-login');
+  setupMobileTopbar();
 }
 
 function showPage(id){
   document.querySelectorAll('#app > .page').forEach(p=>p.style.display='none');
   document.getElementById('admin-sidebar').style.display='none';
   document.getElementById('patient-sidebar').style.display='none';
+  closeMobileSidebar();
   const el=document.getElementById(id);
   if(el){el.style.display='flex';}
+  // Show mobile topbar on all pages except register/login
+  const topbar=document.querySelector('.mobile-topbar');
+  if(topbar){
+    const hide=['page-register','page-login'];
+    topbar.style.display=(window.innerWidth<=768&&!hide.includes(id))?'flex':'none';
+  }
 }
 
 function showAdminUI(){
   document.getElementById('admin-sidebar').style.display='flex';
+  document.getElementById('patient-sidebar').style.display='none';
+  setupMobileTopbar();
+  const user=document.getElementById('mobile-topbar-user');
+  if(user)user.textContent='Nutriólogo';
 }
 
 function showPatientUI(){
   document.getElementById('patient-sidebar').style.display='flex';
+  document.getElementById('admin-sidebar').style.display='none';
+  setupMobileTopbar();
+  const p=getPatient(currentPatientId);
+  const user=document.getElementById('mobile-topbar-user');
+  if(user&&p)user.textContent=p.name.split(' ')[0];
 }
 
 function showAdminPage(name){
@@ -2376,6 +2543,44 @@ function exportPatientPDF(id){
   win.document.close();
   setTimeout(()=>win.print(),400);
 }
+
+// ════════════════════════════════
+// MOBILE UI
+// ════════════════════════════════
+function toggleMobileSidebar(){
+  const sidebar = document.querySelector('.sidebar:not([style*="display:none"])') ||
+                  document.getElementById('admin-sidebar').style.display!=='none' ? document.getElementById('admin-sidebar') :
+                  document.getElementById('patient-sidebar').style.display!=='none' ? document.getElementById('patient-sidebar') :
+                  document.getElementById('tracking-sidebar-inner');
+  // find active visible sidebar
+  const sidebars = [
+    document.getElementById('admin-sidebar'),
+    document.getElementById('patient-sidebar'),
+    document.getElementById('tracking-sidebar-inner')
+  ];
+  const active = sidebars.find(s => s && s.style.display !== 'none' && s.style.display !== '');
+  if(active){
+    active.classList.toggle('open');
+    document.querySelector('.mobile-overlay').style.display = active.classList.contains('open') ? 'block' : 'none';
+  }
+}
+function closeMobileSidebar(){
+  document.querySelectorAll('.sidebar').forEach(s=>s.classList.remove('open'));
+  const ov=document.querySelector('.mobile-overlay');
+  if(ov)ov.style.display='none';
+}
+function setupMobileTopbar(){
+  const topbar=document.querySelector('.mobile-topbar');
+  if(!topbar)return;
+  // Set logo
+  const logoImg=document.querySelector('.sidebar img[style*="border-radius:50%"]');
+  const mobileLogoEl=document.getElementById('mobile-topbar-logo');
+  if(logoImg&&mobileLogoEl) mobileLogoEl.src=logoImg.src;
+  // Show/hide based on viewport
+  const isMobile=window.innerWidth<=768;
+  topbar.style.display=isMobile?'flex':'none';
+}
+window.addEventListener('resize',setupMobileTopbar);
 
 // ════════════════════════════════
 // SYNC
