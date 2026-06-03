@@ -494,7 +494,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   #page-login {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 50 !important;
+    z-index: 200 !important;
     background: #f7f7f7 !important;
     display: flex !important;
     align-items: center !important;
@@ -513,7 +513,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   #page-register {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 50 !important;
+    z-index: 200 !important;
   }
   .register-left { display: none !important; }
   .register-right { width: 100% !important; padding: 24px 20px !important; }
@@ -1354,6 +1354,9 @@ let deleteTarget = null;
 
 async function init(){
   buildScales();
+  // Hide topbar initially
+  const tb=document.getElementById('mobile-topbar');
+  if(tb){tb.style.display='none';tb.style.pointerEvents='none';}
   showPage('page-login'); // show something immediately
   await fetchDB(); // load from JSONBin
   const session = sessionStorage.getItem('radar_session');
@@ -1386,26 +1389,28 @@ function showPage(id){
   document.querySelectorAll('#app > .page').forEach(p=>{
     p.style.display='none';
     p.style.position='';
+    p.style.zIndex='';
   });
   document.getElementById('admin-sidebar').style.display='none';
   document.getElementById('patient-sidebar').style.display='none';
   closeMobileSidebar();
   const el=document.getElementById(id);
-  if(el){
-    el.style.display='flex';
-    // On mobile, make login/register fill the whole screen properly
-    if(window.innerWidth<=768 && (id==='page-login'||id==='page-register')){
-      el.style.position='fixed';
-      el.style.inset='0';
-      el.style.zIndex='50';
-      el.style.background='#f7f7f7';
-    }
-  }
-  // Show mobile topbar on all pages except register/login
-  const topbar=document.querySelector('.mobile-topbar');
+  if(el){ el.style.display='flex'; }
+
+  // Handle topbar visibility
+  const topbar=document.getElementById('mobile-topbar');
+  const hideTopbar=['page-register','page-login'];
   if(topbar){
-    const hide=['page-register','page-login'];
-    topbar.style.display=(window.innerWidth<=768&&!hide.includes(id))?'flex':'none';
+    if(hideTopbar.includes(id)){
+      // Completely hide topbar on login/register - no z-index interference
+      topbar.style.display='none';
+      topbar.style.pointerEvents='none';
+    } else if(window.innerWidth<=900){
+      topbar.style.display='flex';
+      topbar.style.pointerEvents='auto';
+    } else {
+      topbar.style.display='none';
+    }
   }
 }
 
