@@ -1251,13 +1251,1397 @@ function hideLoading(){
   if(el){el.style.opacity='0';setTimeout(()=>{el.style.display='none';},300);}
 }
 
-// duplicate removed
-// duplicate removed
+function fetchDB(){
+  if(_dbCache) return _dbCache;
+  try{
+    var cached=localStorage.getItem(LOCAL_CACHE_KEY);
+    if(cached) _dbCache=JSON.parse(cached);
+  }catch(e){}
+  if(!_dbCache) _dbCache={patients:[],currentPatientId:null};
+  setTimeout(function(){try{syncWithCloud();}catch(e){}},2000);
+  return _dbCache;
+}
+
+function syncWithCloud(){
+  try{
+    fetch(JSONBIN_URL+'/latest',{
+      method:'GET',
+      headers:{'X-Master-Key':JSONBIN_KEY,'X-Bin-Meta':'false'}
+    }).then(function(res){
+      if(!res.ok) return null;
+      return res.json();
+    }).then(function(data){
+      if(data&&data.patients){
+        _dbCache=data;
+        try{localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(data));}catch(e){}
+      }
+    }).catch(function(){});
+  }catch(e){}
+}
+
+function saveDB(db){
+  _dbCache=db;
+  try{localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(db));}catch(e){}
+  setTimeout(function(){pushToCloud(JSON.stringify(db));},300);
+  return true;
+}
+
+function pushToCloud(jsonStr,attempt){
+  attempt=attempt||1;
+  try{
+    fetch(JSONBIN_URL,{
+      method:'PUT',
+      headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},
+      body:jsonStr
+    }).then(function(res){
+      if(!res.ok) throw new Error(res.status);
+    }).catch(function(e){
+      if(attempt<3) setTimeout(function(){pushToCloud(jsonStr,attempt+1);},attempt*2000);
+    });
+  }catch(e){}
+}
+
+function getDB(){return _dbCache||{patients:[],currentPatientId:null};}
+
+function getPatient(id){
+  const db=getDB();
+  return db.patients.find(p=>p.id===id)||null;
+}
+function savePatientRecord(p){
+  const db=getDB();
+  const idx=db.patients.findIndex(x=>x.id===p.id);
+  if(idx>=0)db.patients[idx]=p;
+  else db.patients.push(p);
+  saveDB(db);
+}
+
+// ════════════════════════════════
+// ROUTING
+// ════════════════════════════════
+let currentRole = null; // 'admin' | 'patient'
+let currentPatientId = null;
+let deleteTarget = null;
+
+function init(){
+  buildScales();
+  // Always start at login - hide topbar completely
+  const tb=document.getElementById('mobile-topbar');
+  if(tb){tb.style.display='none';tb.style.pointerEvents='none';}
+  // Clear any old session to prevent topbar blocking login
+  sessionStorage.removeItem('radar_session');
+  showPage('page-login');
+  // Fetch DB in background - don't block UI
+  fetchDB();
+}
+
+function showPage(id){
+  document.querySelectorAll('#app > .page').forEach(p=>{
+    p.style.display='none';
+    p.style.position='';
+    p.style.zIndex='';
+  });
+  document.getElementById('admin-sidebar').style.display='none';
+  document.getElementById('patient-sidebar').style.display='none';
+  closeMobileSidebar();
+  const el=document.getElementById(id);
+  if(el){ el.style.display='flex'; }
+
+  // Handle topbar visibility
+  const topbar=document.getElementById('mobile-topbar');
+  const hideTopbar=['page-register','page-login'];
+  if(topbar){
+    if(hideTopbar.includes(id)){
+      // Completely hide topbar on login/register - no z-index interference
+      topbar.style.display='none';
+      topbar.style.pointerEvents='none';
+    } else if(window.innerWidth<=900){
+      topbar.style.display='flex';
+      topbar.style.pointerEvents='auto';
+    } else {
+      topbar.style.display='none';
+    }
+  }
+}
+
+function showAdminUI(){
+  document.getElementById('admin-sidebar').style.display='flex';
+  document.getElementById('patient-sidebar').style.display='none';
+  setupMobileTopbar();
+  const user=document.getElementById('mobile-topbar-user');
+  if(user)user.textContent='Nutriólogo';
+}
+
+function showPatientUI(){
+  document.getElementById('patient-sidebar').style.display='flex';
+  document.getElementById('admin-sidebar').style.display='none';
+  setupMobileTopbar();
+  const p=getPatient(currentPatientId);
+  const user=document.getElementById('mobile-topbar-user');
+  if(user&&p)user.textContent=p.name.split(' ')[0];
+}
+
+function showAdminPage(name){
+  showPage('page-'+name);
+  showAdminUI();
+  // nav highlight
+  ['patients','dashboard','alerts','config'].forEach(n=>{
+    const el=document.getElementById('nav-'+n);
+    if(el)el.classList.toggle('active',n===name);
+  });
+  // render
+  if(name==='patients') renderPatients();
+  else if(name==='dashboard') renderDashboard();
+  else if(name==='alerts') renderAlerts();
+}
+
+function showPatientPage(name){
+  if(name==='tracking'){
+    showPage('page-tracking');
+    resetTrackingForm();
+  } else {
+    showPage('page-patient-dashboard');
+    showPatientUI();
+    renderPatientDashboard(name);
+  }
+  // nav
+  ['tracking','history','progress','reco'].forEach(n=>{
+    const el=document.getElementById('p-nav-'+n);
+    if(el)el.classList.toggle('active',n===name);
+  });
+}
+
+// ════════════════════════════════
+// AUTH
+// ════════════════════════════════
+function doLogin(){
+  const pw=document.getElementById('login-pw').value;
+  if(pw===getAdminPw()){
+    currentRole='admin';
+    sessionStorage.setItem('radar_session',JSON.stringify({role:'admin'}));
+    document.getElementById('login-error').style.display='none';
+    document.getElementById('login-pw').value='';
+    showAdminUI();
+    showAdminPage('patients');
+  } else {
+    document.getElementById('login-error').style.display='block';
+  }
+}
+function adminLogout(){
+  sessionStorage.removeItem('radar_session');
+  currentRole=null;
+  showPage('page-login');
+}
+function goPatientLogin(){
+  // If patient already registered locally
+  const db=getDB();
+  if(db.currentPatientId){
+    const p=getPatient(db.currentPatientId);
+    if(p){
+      currentRole='patient';
+      currentPatientId=p.id;
+      sessionStorage.setItem('radar_session',JSON.stringify({role:'patient',patientId:p.id}));
+      updatePatientSidebar(p);
+      showPatientPage('tracking');
+      return;
+    }
+  }
+  showPage('page-register');
+}
+function patientLogout(){
+  sessionStorage.removeItem('radar_session');
+  currentRole=null;
+  currentPatientId=null;
+  showPage('page-login');
+}
+function changePassword(){
+  const oldPw=document.getElementById('cfg-old-pw').value;
+  const newPw=document.getElementById('cfg-new-pw').value;
+  const confirmPw=document.getElementById('cfg-confirm-pw').value;
+  const msg=document.getElementById('cfg-msg');
+  if(oldPw!==getAdminPw()){
+    msg.style.display='block';msg.style.background='rgba(225,6,0,0.08)';msg.style.color='var(--red)';
+    msg.textContent='La contraseña actual no es correcta.';return;
+  }
+  if(newPw.length<6){
+    msg.style.display='block';msg.style.background='rgba(225,6,0,0.08)';msg.style.color='var(--red)';
+    msg.textContent='La nueva contraseña debe tener al menos 6 caracteres.';return;
+  }
+  if(newPw!==confirmPw){
+    msg.style.display='block';msg.style.background='rgba(225,6,0,0.08)';msg.style.color='var(--red)';
+    msg.textContent='Las contraseñas no coinciden.';return;
+  }
+  setAdminPw(newPw);
+  msg.style.display='block';msg.style.background='rgba(22,163,74,0.08)';msg.style.color='var(--green)';
+  msg.textContent='Contraseña actualizada correctamente.';
+  document.getElementById('cfg-old-pw').value='';
+  document.getElementById('cfg-new-pw').value='';
+  document.getElementById('cfg-confirm-pw').value='';
+}
+
+// ════════════════════════════════
+// REGISTRATION
+// ════════════════════════════════
+function saveRegistration(){
+  const name=document.getElementById('reg-name').value.trim();
+  const phone=document.getElementById('reg-phone').value.trim();
+  if(!name){alert('Por favor ingresa tu nombre completo.');return;}
+  // Create patient record
+  const db=getDB();
+  let p=db.patients.find(x=>x.phone===phone&&phone)||null;
+  if(!p){
+    p={
+      id:'p'+Date.now(),
+      name,phone,
+      age:'',gender:'',
+      since:new Date().toISOString().slice(0,10),
+      trackings:[],
+      notes:[],
+      recommendations:[]
+    };
+    db.patients.push(p);
+  }
+  db.currentPatientId=p.id;
+  saveDB(db);
+  currentPatientId=p.id;
+  currentRole='patient';
+  sessionStorage.setItem('radar_session',JSON.stringify({role:'patient',patientId:p.id}));
+  updatePatientSidebar(p);
+  showPatientPage('tracking');
+}
+
+function updatePatientSidebar(p){
+  document.getElementById('track-sidebar-avatar').textContent=p.name[0].toUpperCase();
+  document.getElementById('track-sidebar-name').textContent=p.name;
+  const pn=document.getElementById('patient-sidebar-name');
+  if(pn)pn.textContent=p.name;
+  const pa=document.getElementById('patient-sidebar-avatar');
+  if(pa)pa.textContent=p.name[0].toUpperCase();
+}
+
+// ════════════════════════════════
+// TRACKING FORM
+// ════════════════════════════════
+const scales={q4:0,q5:0,q7:0};
+
+function buildScales(){
+  ['q4','q5','q7'].forEach(id=>{
+    const wrap=document.getElementById(id+'-scale');
+    if(!wrap)return;
+    wrap.innerHTML='';
+    for(let i=1;i<=10;i++){
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.className='scale-btn';
+      btn.textContent=i;
+      btn.dataset.val=i;
+      btn.dataset.q=id;
+      btn.onclick=function(){selectScale(id,i,this);};
+      wrap.appendChild(btn);
+    }
+  });
+}
+
+function selectScale(id,val,btn){
+  scales[id]=val;
+  document.querySelectorAll('#'+id+'-scale .scale-btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  // conditional
+  if(id==='q4'){document.getElementById('q4-conditional').style.display=val<=5?'block':'none';}
+  if(id==='q5'){document.getElementById('q5-conditional').style.display=val<=5?'block':'none';}
+  if(id==='q7'){document.getElementById('q7-conditional').style.display=val<=5?'block':'none';}
+  updateProgress();
+}
+
+function selectOpt(label,name){
+  document.querySelectorAll('[name="'+name+'"]').forEach(r=>{
+    r.closest('.radio-opt').classList.remove('selected');
+  });
+  label.classList.add('selected');
+  label.querySelector('input').checked=true;
+  // conditionals for q2
+  if(name==='q2'){
+    const val=label.querySelector('input').value;
+    document.getElementById('q2c-stress-wrap').style.display=val==='Estrés'?'block':'none';
+    document.getElementById('q2c-eco-wrap').style.display=val==='Economía'?'block':'none';
+    document.getElementById('q2c-social-wrap').style.display=val==='Eventos sociales'?'block':'none';
+  }
+  updateProgress();
+}
+
+function updateCharCount(ta,countId){
+  const el=document.getElementById(countId);
+  if(el)el.textContent=ta.value.length;
+}
+
+function updateProgress(){
+  let filled=0,total=8;
+  if(document.getElementById('q1')&&document.getElementById('q1').value.trim())filled++;
+  if(document.querySelector('[name="q2"]:checked'))filled++;
+  if(document.querySelector('[name="q3"]:checked'))filled++;
+  if(scales.q4>0)filled++;
+  if(scales.q5>0)filled++;
+  if(document.getElementById('q6')&&document.getElementById('q6').value.trim())filled++;
+  if(scales.q7>0)filled++;
+  if(document.getElementById('q8')&&document.getElementById('q8').value.trim())filled++;
+  const pct=Math.round(filled/total*100);
+  const bar=document.getElementById('track-bar');
+  const pctEl=document.getElementById('track-pct');
+  if(bar)bar.style.width=pct+'%';
+  if(pctEl)pctEl.textContent=pct+'%';
+}
+
+function resetTrackingForm(){
+  // reset values
+  ['q1','q6','q8','q5c','q7c','q2c-eco','q2c-social'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  ['q4','q5','q7'].forEach(id=>{
+    scales[id]=0;
+    document.querySelectorAll('#'+id+'-scale .scale-btn').forEach(b=>b.classList.remove('selected'));
+    const cond=document.getElementById(id+'-conditional');
+    if(cond)cond.style.display='none';
+  });
+  document.querySelectorAll('.radio-opt').forEach(r=>r.classList.remove('selected'));
+  document.querySelectorAll('.radio-opt input').forEach(r=>r.checked=false);
+  ['q2c-stress-wrap','q2c-eco-wrap','q2c-social-wrap'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display='none';
+  });
+  ['q1-count','q6-count','q8-count','q5c-count','q7c-count','q2ceco-count','q2csocial-count'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.textContent='0';
+  });
+  updateProgress();
+}
+
+function submitTracking(){
+  if(!scales.q4||!scales.q5||!scales.q7){
+    alert('Por favor completa todas las escalas de puntuación (preguntas 4, 5 y 7).');return;
+  }
+  const q2val=document.querySelector('[name="q2"]:checked');
+  if(!q2val){alert('Por favor selecciona un factor de influencia (pregunta 2).');return;}
+  const q3val=document.querySelector('[name="q3"]:checked');
+  if(!q3val){alert('Por favor selecciona una emoción (pregunta 3).');return;}
+
+  // Check if need conditional modal
+  const needModal=scales.q4<=5||scales.q7<=5;
+  if(needModal){
+    openCondModal();
+    return;
+  }
+  finalizeTracking();
+}
+
+function openCondModal(){
+  let html='';
+  if(scales.q4<=5){
+    html+=`<div style="background:var(--gray);border-radius:12px;padding:16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:36px;height:36px;border-radius:9px;background:rgba(225,6,0,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:700">Tu energía fue baja esta semana (${scales.q4}/10).</div>
+          <div style="font-size:12px;color:var(--text2)">¿Qué crees que contribuyó más a sentirte así?</div>
+        </div>
+      </div>
+      <div class="radio-grid cols2" id="modal-q4c-opts">
+        ${['Mal descanso','Estrés','Alimentación irregular','Exceso de trabajo','Enfermedad','Otro'].map(o=>`<label class="radio-opt" onclick="selectOpt(this,'mq4c')"><input type="radio" name="mq4c" value="${o}">${o}</label>`).join('')}
+      </div>
+    </div>`;
+  }
+  if(scales.q7<=5){
+    html+=`<div style="background:var(--gray);border-radius:12px;padding:16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:36px;height:36px;border-radius:9px;background:rgba(225,6,0,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:700">Tu confianza fue baja esta semana (${scales.q7}/10).</div>
+          <div style="font-size:12px;color:var(--text2)">¿Qué necesitarías para sentirte más preparado la próxima semana?</div>
+        </div>
+      </div>
+      <textarea class="form-control" id="modal-q7c" placeholder="Escribe tu respuesta..." maxlength="300" style="height:80px" oninput="updateCharCount(this,'modal-q7c-count')"></textarea>
+      <div class="char-count"><span id="modal-q7c-count">0</span>/300</div>
+    </div>`;
+  }
+  document.getElementById('cond-modal-body').innerHTML=html;
+  document.getElementById('cond-modal').style.display='flex';
+}
+
+function closeCondModal(){document.getElementById('cond-modal').style.display='none';}
+
+function saveConditionalAndSubmit(){
+  // grab modal data
+  const mq4c=document.querySelector('[name="mq4c"]:checked');
+  const mq7cEl=document.getElementById('modal-q7c');
+  if(mq4c) document.querySelector('[name="q4c"]') && (document.getElementById('q4-conditional').querySelector('[value="'+mq4c.value+'"]') && (document.getElementById('q4-conditional').querySelector('[value="'+mq4c.value+'"]').checked=true));
+  closeCondModal();
+  finalizeTracking(mq4c?mq4c.value:null, mq7cEl?mq7cEl.value:'');
+}
+
+function finalizeTracking(energyReason, confReason){
+  const p=getPatient(currentPatientId);
+  if(!p){return;}
+  const tracking={
+    id:'t'+Date.now(),
+    date:new Date().toISOString().slice(0,10),
+    week:getWeekLabel(),
+    q1:document.getElementById('q1').value.trim(),
+    q2:document.querySelector('[name="q2"]:checked')?.value||'',
+    q2cs:document.querySelector('[name="q2cs"]:checked')?.value||'',
+    q2eco:document.getElementById('q2c-eco')?.value||'',
+    q2social:document.getElementById('q2c-social')?.value||'',
+    q3:document.querySelector('[name="q3"]:checked')?.value||'',
+    q4:scales.q4,
+    q4c:energyReason||document.querySelector('[name="q4c"]:checked')?.value||'',
+    q5:scales.q5,
+    q5c:document.getElementById('q5c')?.value||'',
+    q6:document.getElementById('q6').value.trim(),
+    q7:scales.q7,
+    q7c:confReason||document.getElementById('q7c')?.value||'',
+    q8:document.getElementById('q8').value.trim(),
+  };
+  p.trackings.push(tracking);
+  savePatientRecord(p);
+  hideLoading();
+  // show success
+  showPage('page-patient-dashboard');
+  showPatientUI();
+  updatePatientSidebar(p);
+  renderPatientDashboard('success');
+}
+
+function getWeekLabel(){
+  const now=new Date();
+  const start=new Date(now);
+  start.setDate(now.getDate()-now.getDay()+1);
+  const end=new Date(start);end.setDate(start.getDate()+6);
+  const fmt=d=>d.toLocaleDateString('es-MX',{day:'numeric',month:'short'});
+  return `${fmt(start)} – ${fmt(end)}`;
+}
+
+// ════════════════════════════════
+// PATIENTS ADMIN
+// ════════════════════════════════
+let patientsFilter='all';
+let patientPage=1;
+const PAGE_SIZE=8;
+
+function renderPatients(){
+  const db=getDB();
+  const stats=computeStats(db.patients);
+  // Stats row
+  const sr=document.getElementById('patients-stats');
+  if(sr) sr.innerHTML=`
+    <div class="stat-card"><div class="stat-icon red"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="stat-info"><div class="stat-value">${db.patients.length}</div><div class="stat-label">Pacientes activos</div></div></div>
+    <div class="stat-card"><div class="stat-icon yellow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${'#D97706'}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div><div class="stat-info"><div class="stat-value">${stats.moderate}</div><div class="stat-label">Riesgo moderado</div></div></div>
+    <div class="stat-card"><div class="stat-icon red"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div><div class="stat-info"><div class="stat-value">${stats.high}</div><div class="stat-label">Riesgo alto</div></div></div>
+    <div class="stat-card"><div class="stat-icon green"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="stat-info"><div class="stat-value">${stats.low}</div><div class="stat-label">Riesgo bajo</div></div></div>
+    <div class="stat-card"><div class="stat-icon gray"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div><div class="stat-info"><div class="stat-value">${stats.avgAdherence}%</div><div class="stat-label">Adherencia promedio</div></div></div>
+  `;
+  renderPatientTable();
+  // alert badge
+  const ab=document.getElementById('alert-badge');
+  if(ab)ab.textContent=stats.high+stats.moderate;
+}
+
+function renderPatientTable(){
+  const db=getDB();
+  const search=(document.getElementById('patient-search')?.value||'').toLowerCase();
+  let patients=db.patients.filter(p=>!search||p.name.toLowerCase().includes(search));
+  if(patientsFilter!=='all') patients=patients.filter(p=>getPatientRisk(p).level===patientsFilter);
+  const total=patients.length;
+  const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  if(patientPage>pages)patientPage=1;
+  const slice=patients.slice((patientPage-1)*PAGE_SIZE,patientPage*PAGE_SIZE);
+  const tbody=document.getElementById('patients-table-body');
+  if(!tbody)return;
+  tbody.innerHTML=slice.map(p=>{
+    const risk=getPatientRisk(p);
+    const adh=getAdherence(p);
+    const lastDate=p.trackings.length?p.trackings[p.trackings.length-1].date:'—';
+    const lastLabel=lastDate==='—'?'Sin seguimientos':formatRelDate(lastDate);
+    const barColor=adh>=75?'var(--green)':adh>=50?'var(--yellow)':'var(--red)';
+    return `<div class="table-row" onclick="openProfile('${p.id}')">
+      <div class="patient-cell">
+        <div class="patient-avatar" style="background:${stringToColor(p.name)};color:#fff">${p.name[0].toUpperCase()}</div>
+        <div><div class="patient-name">${p.name}</div><div class="patient-age">${p.age?p.age+' años':p.phone||''}</div></div>
+      </div>
+      <div><span class="risk-badge risk-${risk.cls}"><span class="risk-dot" style="background:${risk.color}"></span>${risk.label}</span></div>
+      <div><div style="font-size:13px;font-weight:500">${lastLabel}</div><div style="font-size:12px;color:var(--text2)">${lastDate!=='—'?lastDate:''}</div></div>
+      <div class="adherence-cell">
+        <div style="flex:1"><div class="progress-bar-wrap"><div class="progress-bar" style="width:${adh}%;background:${barColor}"></div></div></div>
+        <div class="adherence-val">${adh}%</div>
+      </div>
+      <div class="table-actions" onclick="event.stopPropagation()">
+        <div class="action-btn" onclick="openProfile('${p.id}')" title="Ver perfil"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <div class="action-btn" onclick="openDeleteModal('${p.id}')" title="Eliminar" style="color:var(--red)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>
+      </div>
+    </div>`;
+  }).join('')||'<div style="text-align:center;padding:40px;color:var(--text2)">No se encontraron pacientes</div>';
+  // pagination
+  renderPagination(pages);
+}
+
+function renderPagination(pages){
+  const el=document.getElementById('patients-pagination');
+  if(!el)return;
+  let html=`<button class="page-btn" onclick="goPage(${patientPage-1})" ${patientPage===1?'disabled':''}>‹</button>`;
+  for(let i=1;i<=pages;i++){
+    if(pages>7&&i>3&&i<pages-2&&Math.abs(i-patientPage)>1){
+      if(i===4)html+='<span style="padding:0 4px;color:var(--gray4)">...</span>';
+    } else {
+      html+=`<button class="page-btn ${i===patientPage?'active':''}" onclick="goPage(${i})">${i}</button>`;
+    }
+  }
+  html+=`<button class="page-btn" onclick="goPage(${patientPage+1})" ${patientPage===pages?'disabled':''}>›</button>`;
+  el.innerHTML=html;
+}
+
+function goPage(n){patientPage=n;renderPatientTable();}
+
+function filterPatients(){
+  const opts=['all','low','moderate','high'];
+  const cur=opts.indexOf(patientsFilter);
+  patientsFilter=opts[(cur+1)%opts.length];
+  renderPatientTable();
+}
+
+// ════════════════════════════════
+// ADD / DELETE PATIENT
+// ════════════════════════════════
+function openAddPatient(){document.getElementById('add-patient-modal').style.display='flex';}
+function closeAddPatient(){document.getElementById('add-patient-modal').style.display='none';}
+function savePatient(){
+  const name=document.getElementById('ap-name').value.trim();
+  if(!name){document.getElementById('ap-error').style.display='block';document.getElementById('ap-error').textContent='El nombre es requerido.';return;}
+  const db=getDB();
+  const p={
+    id:'p'+Date.now(),
+    name,
+    phone:document.getElementById('ap-phone').value.trim(),
+    age:document.getElementById('ap-age').value,
+    gender:document.getElementById('ap-gender').value,
+    since:new Date().toISOString().slice(0,10),
+    trackings:[],notes:[],recommendations:[]
+  };
+  db.patients.push(p);saveDB(db);
+  closeAddPatient();
+  ['ap-name','ap-phone','ap-age'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('ap-error').style.display='none';
+  renderPatients();
+}
+function openDeleteModal(id){deleteTarget=id;document.getElementById('delete-modal').style.display='flex';}
+function closeDeleteModal(){deleteTarget=null;document.getElementById('delete-modal').style.display='none';}
+function confirmDelete(){
+  if(!deleteTarget)return;
+  showLoading('Eliminando paciente...');
+  const db=getDB();
+  db.patients=db.patients.filter(p=>p.id!==deleteTarget);
+  saveDB(db);
+  hideLoading();
+  closeDeleteModal();renderPatients();
+}
+
+// ════════════════════════════════
+// PROFILE
+// ════════════════════════════════
+let profileTab='resumen';
+let profileId=null;
+
+function openProfile(id){
+  profileId=id;
+  profileTab='resumen';
+  showPage('page-profile');
+  showAdminUI();
+  ['patients','dashboard','alerts','config'].forEach(n=>{
+    const el=document.getElementById('nav-'+n);
+    if(el)el.classList.remove('active');
+  });
+  document.getElementById('nav-patients').classList.add('active');
+  renderProfile();
+}
+
+function renderProfile(){
+  const p=getPatient(profileId);
+  if(!p)return;
+  const risk=getPatientRisk(p);
+  const adh=getAdherence(p);
+  const vit=computeVitality(p);
+  const content=document.getElementById('profile-content');
+  content.innerHTML=`
+    <div class="page-header" style="margin-bottom:0">
+      <button class="back-btn" onclick="showAdminPage('patients')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Volver a pacientes
+      </button>
+      <div class="header-actions">
+        <button class="btn btn-outline btn-sm" onclick="openProfileAnalysis('${p.id}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Análisis avanzado
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="exportPatientPDF('${p.id}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Descargar reporte
+        </button>
+      </div>
+    </div>
+    <!-- Profile header -->
+    <div class="profile-header">
+      <div class="profile-avatar" style="background:${stringToColor(p.name)};color:#fff;font-size:28px">${p.name[0].toUpperCase()}</div>
+      <div class="profile-info">
+        <div class="profile-name">${p.name} <span class="risk-badge risk-low" style="font-size:12px;vertical-align:middle">Activo</span></div>
+        <div class="profile-meta">
+          ${p.age?`<span>${p.age} años</span>`:''}
+          ${p.gender?`<span>· ${p.gender}</span>`:''}
+          ${p.phone?`<span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 11.61 19a19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 3.12 4.12 2 2 0 0 1 5.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.91 9.91a16 16 0 0 0 6 6l.46-.46a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 23 18z"/></svg> ${p.phone}</span>`:''}
+        </div>
+        ${p.since?`<div class="profile-since">Paciente desde: ${formatDate(p.since)}</div>`:''}
+      </div>
+      <div class="profile-stats">
+        <div class="mini-stat-card">
+          <div class="mini-stat-label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Riesgo de abandono</div>
+          <div class="mini-stat-value" style="color:${risk.color}">${risk.label}</div>
+          <div class="mini-stat-sub">↗ Tendencia estable</div>
+        </div>
+        <div class="mini-stat-card">
+          <div class="mini-stat-label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Puntuación de bienestar</div>
+          <div class="mini-stat-value" style="color:var(--green)">${vit} <span style="font-size:13px;font-weight:400;color:var(--text2)">/100</span></div>
+        </div>
+      </div>
+    </div>
+    <!-- Tabs -->
+    <div class="tabs">
+      ${['resumen','historial','analisis','recomendaciones','notas'].map(t=>`<div class="tab ${profileTab===t?'active':''}" onclick="switchProfileTab('${t}')">${tabLabel(t)}</div>`).join('')}
+    </div>
+    <div id="profile-tab-content"></div>
+  `;
+  renderProfileTab();
+}
+
+function tabLabel(t){return{resumen:'Resumen',historial:'Historial semanal',analisis:'Análisis detallado',recomendaciones:'Recomendaciones',notas:'Notas clínicas'}[t]||t;}
+
+function switchProfileTab(t){profileTab=t;renderProfile();}
+
+function renderProfileTab(){
+  const p=getPatient(profileId);
+  const el=document.getElementById('profile-tab-content');
+  if(!el||!p)return;
+  if(profileTab==='resumen')el.innerHTML=renderResumenTab(p);
+  else if(profileTab==='historial')el.innerHTML=renderHistorialTab(p);
+  else if(profileTab==='analisis')el.innerHTML=renderAnalisisTab(p);
+  else if(profileTab==='recomendaciones')el.innerHTML=renderRecoTab(p);
+  else if(profileTab==='notas')el.innerHTML=renderNotasTab(p);
+  // Charts
+  setTimeout(()=>{
+    if(profileTab==='resumen')drawResumenChart(p);
+    else if(profileTab==='analisis')drawAnalisisCharts(p);
+  },50);
+}
+
+function renderResumenTab(p){
+  const avgs=computeAverages(p,4);
+  const last=p.trackings[p.trackings.length-1];
+  const adh=getAdherence(p);
+  const barriers=getBarriers(p);
+  const learnings=getLearnings(p);
+  const emoFreq=getEmotionFreq(p);
+  return `
+    <div class="metric-cards">
+      <div class="metric-card"><div class="metric-card-icon" style="background:rgba(225,6,0,0.08)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="metric-card-val">${avgs.energy}<span>/10</span></div><div class="metric-card-label">Promedio energía</div><div class="metric-card-sub">Últimas 4 semanas</div></div>
+      <div class="metric-card"><div class="metric-card-icon" style="background:rgba(225,6,0,0.08)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="metric-card-val">${avgs.env}<span>/10</span></div><div class="metric-card-label">Entorno promedio</div><div class="metric-card-sub">Últimas 4 semanas</div></div>
+      <div class="metric-card"><div class="metric-card-icon" style="background:rgba(225,6,0,0.08)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="metric-card-val">${avgs.conf}<span>/10</span></div><div class="metric-card-label">Confianza promedio</div><div class="metric-card-sub">Últimas 4 semanas</div></div>
+      <div class="metric-card"><div class="metric-card-icon" style="background:rgba(225,6,0,0.08)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div><div class="metric-card-val">${p.trackings.length}<span>/8</span></div><div class="metric-card-label">Seguimientos completados</div><div class="metric-card-sub">Esta semana</div></div>
+      <div class="metric-card" style="align-items:flex-start;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span style="font-size:12px;color:var(--text2)">Adherencia promedio</span>
+        </div>
+        <div style="position:relative;width:60px;height:60px;margin-top:4px">
+          <canvas id="adh-donut" width="60" height="60"></canvas>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${adh}%</div>
+        </div>
+        <div style="font-size:11px;color:var(--text2)">Últimas 4 semanas</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin-bottom:16px">
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">Evolución de puntuaciones</div></div>
+        <canvas id="resumen-chart" height="120"></canvas>
+      </div>
+      <div>
+        ${last?`<div class="summary-recent">
+          <div class="summary-recent-header">
+            <div class="summary-recent-title">Resumen semanal más reciente</div>
+            <div class="summary-recent-date">${formatDate(last.date)}</div>
+          </div>
+          <div class="summary-items">
+            <div class="summary-item"><div class="summary-item-icon" style="background:rgba(225,6,0,0.08)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></div><div class="summary-item-content"><div class="summary-item-label">Mayor logro</div><div class="summary-item-text">${last.q1||'—'}</div></div></div>
+            <div class="summary-item"><div class="summary-item-icon" style="background:rgba(225,6,0,0.08)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div><div class="summary-item-content"><div class="summary-item-label">Principal obstáculo</div><div class="summary-item-text">${last.q2||'—'}</div></div></div>
+            <div class="summary-item"><div class="summary-item-icon" style="background:rgba(225,6,0,0.08)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg></div><div class="summary-item-content"><div class="summary-item-label">Emoción predominante</div><div class="summary-item-text">${last.q3||'—'}</div></div></div>
+          </div>
+          <div class="summary-scores">
+            <div class="summary-score"><div class="summary-score-label"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Energía</div><div class="summary-score-val">${last.q4}</div></div>
+            <div class="summary-score"><div class="summary-score-label"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/></svg>Entorno</div><div class="summary-score-val">${last.q5}</div></div>
+            <div class="summary-score"><div class="summary-score-label"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/></svg>Confianza</div><div class="summary-score-val">${last.q7}</div></div>
+          </div>
+        </div>`:'<div class="card" style="text-align:center;color:var(--text2);padding:32px">Sin seguimientos aún</div>'}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:15px">Principales barreras recurrentes</h3>
+        <div class="progress-list">
+          ${barriers.slice(0,5).map(b=>`<div class="progress-item"><div class="progress-item-label" style="font-size:12px">${b.label}</div><div class="progress-item-bar"><div class="progress-item-fill" style="width:${b.pct}%"></div></div><div class="progress-item-val">${b.pct}%</div></div>`).join('')||'<div style="color:var(--text2);font-size:13px">Sin datos</div>'}
+        </div>
+        <div style="font-size:11px;color:var(--gray4);margin-top:10px">Basado en las últimas 8 semanas</div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:15px">Aprendizajes más frecuentes</h3>
+        ${learnings.slice(0,4).map(l=>`<div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2" style="flex-shrink:0;margin-top:2px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span style="font-size:13px">${l}</span></div>`).join('')||'<div style="color:var(--text2);font-size:13px">Sin aprendizajes registrados</div>'}
+        <div style="font-size:11px;color:var(--gray4);margin-top:10px">Basado en las últimas 8 semanas</div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:15px">Emociones predominantes</h3>
+        <div id="emo-donut-wrap" style="display:flex;align-items:center;gap:14px">
+          <canvas id="emo-donut" width="90" height="90" style="flex-shrink:0"></canvas>
+          <div class="donut-legend" style="flex:1">
+            ${emoFreq.slice(0,5).map(e=>`<div class="donut-legend-item"><div class="donut-legend-color" style="background:${emoColor(e.label)}"></div><div class="donut-legend-label">${e.label}</div><div class="donut-legend-pct">${e.pct}%</div></div>`).join('')}
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--gray4);margin-top:10px">Basado en las últimas 8 semanas</div>
+      </div>
+    </div>
+
+    ${last?`<div class="alert-box">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(225,6,0,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+        <div>
+          <div class="alert-title">Recomendación automática basada en los datos de ${p.name}</div>
+          <div class="alert-sub">${generateAutoReco(p)}</div>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm alert-action" onclick="switchProfileTab('recomendaciones')">Ver recomendaciones →</button>
+    </div>`:''}
+  `;
+}
+
+function renderHistorialTab(p){
+  if(!p.trackings.length) return '<div class="card" style="text-align:center;color:var(--text2);padding:40px">No hay seguimientos registrados aún.</div>';
+  return '<div>'+[...p.trackings].reverse().map(t=>`
+    <div class="history-row">
+      <div class="history-row-header">
+        <div class="history-row-title">${t.week||'Semana'}</div>
+        <div class="history-row-date">${formatDate(t.date)}</div>
+      </div>
+      <div class="history-scores">
+        <div class="h-score"><span class="h-score-label">Energía:</span><span class="h-score-val">${t.q4}/10</span></div>
+        <div class="h-score"><span class="h-score-label">Entorno:</span><span class="h-score-val">${t.q5}/10</span></div>
+        <div class="h-score"><span class="h-score-label">Confianza:</span><span class="h-score-val">${t.q7}/10</span></div>
+        <div class="h-score"><span class="h-score-label">Emoción:</span><span class="h-score-val">${t.q3||'—'}</span></div>
+        <div class="h-score"><span class="h-score-label">Barrera:</span><span class="h-score-val">${t.q2||'—'}</span></div>
+      </div>
+      ${t.q1?`<div style="margin-top:8px;font-size:13px;color:var(--text2)"><strong>Logro:</strong> ${t.q1}</div>`:''}
+      ${t.q6?`<div style="margin-top:4px;font-size:13px;color:var(--text2)"><strong>Aprendizaje:</strong> ${t.q6}</div>`:''}
+    </div>
+  `).join('')+'</div>';
+}
+
+function renderAnalisisTab(p){
+  const vit=computeVitality(p);
+  const profile=detectProfile(p);
+  const risk=getPatientRisk(p);
+  const avgs=computeAverages(p,8);
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="chart-card">
+        <div class="chart-card-title" style="margin-bottom:14px">Evolución de métricas clave</div>
+        <canvas id="analysis-chart" height="140"></canvas>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="card">
+          <div style="font-size:14px;font-weight:700;margin-bottom:8px">Índice de Vitalidad Conductual</div>
+          <div style="display:flex;align-items:center;gap:14px">
+            <div>
+              <div style="font-size:36px;font-weight:800;color:${vit>=70?'var(--green)':vit>=50?'var(--yellow)':'var(--red)'}">${vit}</div>
+              <div style="font-size:12px;color:var(--text2)">/100 · ${vit>=70?'Bueno':vit>=50?'Regular':'Bajo'}</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+              ${[
+                {l:'Energía',v:Math.round(avgs.energy*10)},
+                {l:'Entorno',v:Math.round(avgs.env*10)},
+                {l:'Confianza',v:Math.round(avgs.conf*10)},
+                {l:'Aprendizaje',v:p.trackings.filter(t=>t.q6).length*12+40},
+                {l:'Manejo barreras',v:Math.round((avgs.conf+avgs.env)/2*10)}
+              ].map(row=>`<div class="sub-bar-row"><div class="sub-bar-label">${row.l}</div><div class="sub-bar-track"><div class="sub-bar-fill" style="width:${row.v}%"></div></div><div class="sub-bar-val">${row.v}/100</div></div>`).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px">Perfil conductual detectado</div>
+        <div class="profile-name-badge">${profile.icon} ${profile.name}</div>
+        <div class="profile-desc">${profile.desc}</div>
+        <div class="profile-chars">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Características principales</div>
+          <ul>${profile.chars.map(c=>`<li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>${c}</li>`).join('')}</ul>
+        </div>
+        <div class="strengths-section">
+          <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>Fortalezas</h4>
+          ${profile.strengths.map(s=>`<div class="strength-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>${s}</div>`).join('')}
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px">Riesgo de abandono</div>
+        <div style="font-size:32px;font-weight:800;color:${risk.color};margin-bottom:4px">${risk.label}</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:14px">${risk.score}/100 · Posibilidad de abandono en las próximas 4 semanas</div>
+        <div class="protect-box">
+          <h4><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Factores que protegen tu progreso</h4>
+          <ul>
+            <li>Mantiene una buena adherencia.</li>
+            <li>Reconoce sus obstáculos y emociones.</li>
+            <li>Ha mostrado avances constantes.</li>
+          </ul>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px">Recomendación automática</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.6">${generateAutoReco(p)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecoTab(p){
+  const recos=generateRecommendations(p);
+  return `
+    <div class="reco-section">
+      ${recos.map(r=>`<div class="reco-item"><div class="reco-item-title">${r.icon} ${r.title}</div><div class="reco-item-text">${r.text}</div></div>`).join('')}
+      <div style="margin-top:16px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:12px">Agregar recomendación personalizada</div>
+        <div class="add-note-area">
+          <textarea id="new-reco-text" placeholder="Escribe una recomendación para este paciente..."></textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="addReco('${p.id}')">Agregar</button>
+        </div>
+      </div>
+      ${p.recommendations.length?`<div style="margin-top:16px"><div style="font-size:14px;font-weight:600;margin-bottom:10px">Recomendaciones guardadas</div>${p.recommendations.map(r=>`<div class="reco-item"><div class="reco-item-title">📌 Nota personalizada</div><div class="reco-item-text">${r.text}</div><div style="font-size:11px;color:var(--gray4);margin-top:6px">${formatDate(r.date)}</div></div>`).join('')}</div>`:''}
+    </div>
+  `;
+}
+
+function addReco(id){
+  const text=document.getElementById('new-reco-text')?.value.trim();
+  if(!text)return;
+  const p=getPatient(id);
+  if(!p)return;
+  p.recommendations=p.recommendations||[];
+  p.recommendations.push({text,date:new Date().toISOString().slice(0,10)});
+  savePatientRecord(p);
+  renderProfileTab();
+}
+
+function renderNotasTab(p){
+  return `
+    <div class="notes-wrap">
+      <div class="add-note-area">
+        <div style="font-size:14px;font-weight:600;margin-bottom:10px">Nueva nota clínica</div>
+        <textarea id="new-note-text" placeholder="Escribe una nota clínica sobre este paciente..."></textarea>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="addNote('${p.id}')">Agregar nota</button>
+      </div>
+      ${p.notes.length?[...p.notes].reverse().map(n=>`<div class="note-card"><div class="note-header"><div style="font-size:13px;font-weight:600">Nota clínica</div><div class="note-date">${formatDate(n.date)}</div></div><div class="note-text">${n.text}</div></div>`).join(''):'<div style="color:var(--text2);font-size:13px;padding:10px 0">No hay notas clínicas aún.</div>'}
+    </div>
+  `;
+}
+
+function addNote(id){
+  const text=document.getElementById('new-note-text')?.value.trim();
+  if(!text)return;
+  const p=getPatient(id);
+  if(!p)return;
+  p.notes=p.notes||[];
+  p.notes.push({text,date:new Date().toISOString().slice(0,10)});
+  savePatientRecord(p);
+  renderProfileTab();
+}
+
+function openProfileAnalysis(id){
+  // same as profile but on analysis tab
+  profileId=id;
+  profileTab='analisis';
+  showPage('page-profile');
+  showAdminUI();
+  renderProfile();
+}
+
+// ════════════════════════════════
+// CHARTS
+// ════════════════════════════════
+let chartInstances={};
+
+function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];}}
+
+function drawResumenChart(p){
+  const canvas=document.getElementById('resumen-chart');
+  if(!canvas)return;
+  destroyChart('resumen-chart');
+  const weeks=p.trackings.slice(-8);
+  const labels=weeks.map((_,i)=>'Sem '+(i+1));
+  chartInstances['resumen-chart']=new Chart(canvas,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'Energía',data:weeks.map(t=>t.q4),borderColor:'#E10600',backgroundColor:'rgba(225,6,0,0.08)',tension:0.4,pointRadius:4,pointBackgroundColor:'#E10600'},
+        {label:'Entorno',data:weeks.map(t=>t.q5),borderColor:'#0D0D0D',backgroundColor:'rgba(0,0,0,0.04)',tension:0.4,pointRadius:4,pointBackgroundColor:'#0D0D0D'},
+        {label:'Confianza',data:weeks.map(t=>t.q7),borderColor:'#999',backgroundColor:'rgba(0,0,0,0.02)',tension:0.4,pointRadius:4,pointBackgroundColor:'#999'},
+      ]
+    },
+    options:{responsive:true,plugins:{legend:{position:'top',labels:{usePointStyle:true,font:{size:11}}}},scales:{y:{min:0,max:10,ticks:{stepSize:2}}}}
+  });
+  // adh donut
+  const adhCanvas=document.getElementById('adh-donut');
+  if(adhCanvas){
+    const adh=getAdherence(p);
+    destroyChart('adh-donut');
+    chartInstances['adh-donut']=new Chart(adhCanvas,{
+      type:'doughnut',
+      data:{datasets:[{data:[adh,100-adh],backgroundColor:['#E10600','#F5F5F5'],borderWidth:0}]},
+      options:{cutout:'72%',plugins:{legend:{display:false},tooltip:{enabled:false}},responsive:false}
+    });
+  }
+  // emotion donut
+  const emoCanvas=document.getElementById('emo-donut');
+  if(emoCanvas){
+    const ef=getEmotionFreq(p).slice(0,5);
+    destroyChart('emo-donut');
+    chartInstances['emo-donut']=new Chart(emoCanvas,{
+      type:'doughnut',
+      data:{labels:ef.map(e=>e.label),datasets:[{data:ef.map(e=>e.pct),backgroundColor:ef.map(e=>emoColor(e.label)),borderWidth:0}]},
+      options:{cutout:'60%',plugins:{legend:{display:false}},responsive:false}
+    });
+  }
+}
+
+function drawAnalisisCharts(p){
+  const canvas=document.getElementById('analysis-chart');
+  if(!canvas)return;
+  destroyChart('analysis-chart');
+  const weeks=p.trackings.slice(-8);
+  const labels=weeks.map((_,i)=>'Sem '+(i+1));
+  chartInstances['analysis-chart']=new Chart(canvas,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'Energía',data:weeks.map(t=>t.q4),borderColor:'#E10600',tension:0.4,pointRadius:4,pointBackgroundColor:'#E10600'},
+        {label:'Entorno',data:weeks.map(t=>t.q5),borderColor:'#0D0D0D',tension:0.4,pointRadius:4,pointBackgroundColor:'#0D0D0D'},
+        {label:'Confianza',data:weeks.map(t=>t.q7),borderColor:'#999',tension:0.4,pointRadius:4,pointBackgroundColor:'#999'},
+        {label:'Índice general',data:weeks.map(t=>Math.round((t.q4+t.q5+t.q7)/3)),borderColor:'#D97706',tension:0.4,pointRadius:4,pointBackgroundColor:'#D97706',borderDash:[4,3]},
+      ]
+    },
+    options:{responsive:true,plugins:{legend:{position:'top',labels:{usePointStyle:true,font:{size:10}}}},scales:{y:{min:0,max:10,ticks:{stepSize:2}}}}
+  });
+}
+
+// ════════════════════════════════
+// DASHBOARD ADMIN
+// ════════════════════════════════
+function renderDashboard(){
+  const db=getDB();
+  const patients=db.patients;
+  const total=patients.length;
+  const stats=computeStats(patients);
+  const allTrackings=patients.flatMap(p=>p.trackings);
+  const content=document.getElementById('dashboard-content');
+  if(!content)return;
+  content.innerHTML=`
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-icon red"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-value">${total}</div><div class="stat-label">Total pacientes</div></div></div>
+      <div class="stat-card"><div class="stat-icon green"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="stat-info"><div class="stat-value">${stats.low}</div><div class="stat-label">Riesgo bajo</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div><div class="stat-info"><div class="stat-value">${stats.moderate}</div><div class="stat-label">Riesgo moderado</div></div></div>
+      <div class="stat-card"><div class="stat-icon red"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div><div class="stat-info"><div class="stat-value">${stats.high}</div><div class="stat-label">Riesgo alto</div></div></div>
+      <div class="stat-card"><div class="stat-icon gray"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/></svg></div><div class="stat-info"><div class="stat-value">${stats.avgAdherence}%</div><div class="stat-label">Adherencia promedio</div></div></div>
+      <div class="stat-card"><div class="stat-icon gray"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="stat-info"><div class="stat-value">${allTrackings.length}</div><div class="stat-label">Seguimientos totales</div></div></div>
+    </div>
+    <div class="dashboard-charts">
+      <div class="info-card"><h3><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Distribución de riesgo</h3><canvas id="dash-risk-chart" height="160"></canvas></div>
+      <div class="info-card"><h3><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Emociones globales</h3><canvas id="dash-emo-chart" height="160"></canvas></div>
+    </div>
+    <div class="info-card">
+      <h3>Pacientes con mayor riesgo</h3>
+      ${patients.filter(p=>getPatientRisk(p).level==='high').slice(0,5).map(p=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--gray)"><div class="patient-avatar" style="width:36px;height:36px;background:${stringToColor(p.name)};color:#fff;font-size:14px;border-radius:50%;display:flex;align-items:center;justify-content:center">${p.name[0]}</div><div style="flex:1"><div style="font-weight:600">${p.name}</div><div style="font-size:12px;color:var(--text2)">${getAdherence(p)}% adherencia</div></div><span class="risk-badge risk-high"><span class="risk-dot" style="background:var(--red)"></span>Alto</span><button class="btn btn-outline btn-sm" onclick="openProfile('${p.id}')">Ver perfil</button></div>`).join('')||'<div style="color:var(--text2);padding:20px 0;text-align:center">No hay pacientes de alto riesgo</div>'}
+    </div>
+  `;
+  setTimeout(()=>{
+    const riskCanvas=document.getElementById('dash-risk-chart');
+    if(riskCanvas){
+      destroyChart('dash-risk-chart');
+      chartInstances['dash-risk-chart']=new Chart(riskCanvas,{
+        type:'doughnut',
+        data:{labels:['Bajo','Moderado','Alto'],datasets:[{data:[stats.low,stats.moderate,stats.high],backgroundColor:['#16A34A','#D97706','#E10600'],borderWidth:0}]},
+        options:{responsive:true,plugins:{legend:{position:'bottom'}}}
+      });
+    }
+    const emoCanvas=document.getElementById('dash-emo-chart');
+    if(emoCanvas){
+      const db2=getDB();
+      const allT=db2.patients.flatMap(p=>p.trackings);
+      const emoMap={};
+      allT.forEach(t=>{if(t.q3)emoMap[t.q3]=(emoMap[t.q3]||0)+1;});
+      const entries=Object.entries(emoMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+      destroyChart('dash-emo-chart');
+      chartInstances['dash-emo-chart']=new Chart(emoCanvas,{
+        type:'bar',
+        data:{labels:entries.map(e=>e[0]),datasets:[{data:entries.map(e=>e[1]),backgroundColor:entries.map(e=>emoColor(e[0])),borderRadius:6}]},
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{ticks:{stepSize:1}}}}
+      });
+    }
+  },50);
+}
+
+// ════════════════════════════════
+// ALERTS
+// ════════════════════════════════
+function renderAlerts(){
+  const db=getDB();
+  const highRisk=db.patients.filter(p=>getPatientRisk(p).level==='high');
+  const modRisk=db.patients.filter(p=>getPatientRisk(p).level==='moderate');
+  const noActivity=db.patients.filter(p=>{
+    if(!p.trackings.length)return true;
+    const last=new Date(p.trackings[p.trackings.length-1].date);
+    const diff=(new Date()-last)/86400000;
+    return diff>14;
+  });
+  const content=document.getElementById('alerts-content');
+  if(!content)return;
+  content.innerHTML=`
+    ${highRisk.length?`<div class="card" style="margin-bottom:16px"><h3 style="margin-bottom:14px;display:flex;align-items:center;gap:7px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>Riesgo alto de abandono (${highRisk.length})</h3>${highRisk.map(p=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--gray)"><div style="width:36px;height:36px;border-radius:50%;background:${stringToColor(p.name)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">${p.name[0]}</div><div style="flex:1"><div style="font-weight:600">${p.name}</div><div style="font-size:12px;color:var(--text2)">Adherencia: ${getAdherence(p)}%</div></div><button class="btn btn-primary btn-sm" onclick="openProfile('${p.id}')">Ver perfil</button></div>`).join('')}</div>`:''}
+    ${noActivity.length?`<div class="card" style="margin-bottom:16px"><h3 style="margin-bottom:14px;display:flex;align-items:center;gap:7px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>Sin actividad reciente (${noActivity.length})</h3>${noActivity.map(p=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--gray)"><div style="width:36px;height:36px;border-radius:50%;background:${stringToColor(p.name)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">${p.name[0]}</div><div style="flex:1"><div style="font-weight:600">${p.name}</div><div style="font-size:12px;color:var(--text2)">${p.trackings.length?'Último: '+formatRelDate(p.trackings[p.trackings.length-1].date):'Sin seguimientos'}</div></div><button class="btn btn-outline btn-sm" onclick="openProfile('${p.id}')">Ver perfil</button></div>`).join('')}</div>`:''}
+    ${!highRisk.length&&!noActivity.length?'<div class="card" style="text-align:center;padding:40px;color:var(--text2)">✅ No hay alertas activas en este momento.</div>':''}
+  `;
+}
+
+// ════════════════════════════════
+// PATIENT DASHBOARD (patient view)
+// ════════════════════════════════
+function renderPatientDashboard(tab){
+  const p=getPatient(currentPatientId);
+  const el=document.getElementById('page-patient-dashboard');
+  if(!el||!p)return;
+  if(tab==='success'){
+    el.innerHTML=`<div class="success-wrap"><div class="success-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="success-title">¡Seguimiento enviado! 🎉</div><div class="success-sub">Tu información ha sido registrada correctamente. Tu nutriólogo podrá ver tu progreso esta semana.</div><button class="btn btn-primary" style="margin-top:24px" onclick="showPatientPage('history')">Ver mi historial</button></div>`;
+    return;
+  }
+  // Tabs render
+  el.innerHTML=`
+    <div style="flex:1;display:flex;flex-direction:column;padding:28px 32px;overflow:auto">
+      <div class="tabs">
+        ${['history','progress','reco'].map(t=>`<div class="tab ${tab===t?'active':''}" onclick="renderPatientDashboard('${t}')">${{history:'Mi historial',progress:'Mi progreso',reco:'Recomendaciones'}[t]}</div>`).join('')}
+      </div>
+      <div id="patient-tab-body"></div>
+    </div>
+  `;
+  const body=document.getElementById('patient-tab-body');
+  if(tab==='history'){
+    body.innerHTML=renderHistorialTab(p);
+  } else if(tab==='progress'){
+    const avgs=computeAverages(p,4);
+    const barriers=getBarriers(p);
+    body.innerHTML=`
+      <div class="metric-cards">
+        <div class="metric-card"><div class="metric-card-val">${avgs.energy}<span>/10</span></div><div class="metric-card-label">Energía promedio</div></div>
+        <div class="metric-card"><div class="metric-card-val">${avgs.env}<span>/10</span></div><div class="metric-card-label">Entorno promedio</div></div>
+        <div class="metric-card"><div class="metric-card-val">${avgs.conf}<span>/10</span></div><div class="metric-card-label">Confianza promedio</div></div>
+        <div class="metric-card"><div class="metric-card-val">${p.trackings.length}</div><div class="metric-card-label">Seguimientos</div></div>
+      </div>
+      <div class="chart-card" style="margin-bottom:14px">
+        <div class="chart-card-title" style="margin-bottom:12px">Evolución de puntuaciones</div>
+        <canvas id="patient-prog-chart" height="120"></canvas>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;font-size:15px">Principales barreras</h3>
+        <div class="progress-list">
+          ${barriers.slice(0,5).map(b=>`<div class="progress-item"><div class="progress-item-label">${b.label}</div><div class="progress-item-bar"><div class="progress-item-fill" style="width:${b.pct}%"></div></div><div class="progress-item-val">${b.pct}%</div></div>`).join('')||'<div style="color:var(--text2);font-size:13px">Sin datos aún</div>'}
+        </div>
+      </div>
+    `;
+    setTimeout(()=>{
+      const c=document.getElementById('patient-prog-chart');
+      if(!c)return;
+      destroyChart('patient-prog-chart');
+      const weeks=p.trackings.slice(-8);
+      chartInstances['patient-prog-chart']=new Chart(c,{
+        type:'line',
+        data:{labels:weeks.map((_,i)=>'Sem '+(i+1)),datasets:[
+          {label:'Energía',data:weeks.map(t=>t.q4),borderColor:'#E10600',tension:0.4,pointRadius:4},
+          {label:'Entorno',data:weeks.map(t=>t.q5),borderColor:'#0D0D0D',tension:0.4,pointRadius:4},
+          {label:'Confianza',data:weeks.map(t=>t.q7),borderColor:'#999',tension:0.4,pointRadius:4},
+        ]},
+        options:{responsive:true,plugins:{legend:{position:'top',labels:{usePointStyle:true,font:{size:11}}}},scales:{y:{min:0,max:10}}}
+      });
+    },50);
+  } else if(tab==='reco'){
+    const recos=generateRecommendations(p);
+    body.innerHTML=`<div class="reco-section">${recos.map(r=>`<div class="reco-item"><div class="reco-item-title">${r.icon} ${r.title}</div><div class="reco-item-text">${r.text}</div></div>`).join('')}${p.recommendations.map(r=>`<div class="reco-item"><div class="reco-item-title">📌 De tu nutriólogo</div><div class="reco-item-text">${r.text}</div></div>`).join('')}</div>`;
+  }
+}
+
+// ════════════════════════════════
+// ANALYTICS HELPERS
+// ════════════════════════════════
+function computeAverages(p,weeks){
+  const t=p.trackings.slice(-weeks);
+  if(!t.length)return{energy:0,env:0,conf:0};
+  const avg=arr=>arr.length?Math.round(arr.reduce((a,b)=>a+b,0)/arr.length*10)/10:0;
+  return{
+    energy:avg(t.map(x=>x.q4)),
+    env:avg(t.map(x=>x.q5)),
+    conf:avg(t.map(x=>x.q7))
+  };
+}
+
+function computeVitality(p){
+  const avgs=computeAverages(p,8);
+  const learningBonus=Math.min(p.trackings.filter(t=>t.q6&&t.q6.trim()).length*5,20);
+  const base=Math.round((avgs.energy+avgs.env+avgs.conf)/3*10);
+  return Math.min(100,Math.max(0,base+learningBonus));
+}
+
+function getAdherence(p){
+  if(!p.trackings.length)return 0;
+  const expected=Math.max(1,p.trackings.length);
+  return Math.min(100,Math.round((p.trackings.length/Math.max(p.trackings.length,8))*100));
+}
+
+function getPatientRisk(p){
+  const adh=getAdherence(p);
+  const avgs=computeAverages(p,4);
+  const score=(adh/100*40)+(avgs.energy/10*20)+(avgs.conf/10*20)+(avgs.env/10*20);
+  const riskScore=Math.round((1-score/100)*100);
+  if(adh<40||avgs.conf<4||avgs.energy<4)return{level:'high',cls:'high',label:'Alto',color:'var(--red)',score:Math.max(riskScore,60)};
+  if(adh<65||avgs.conf<6||avgs.energy<5)return{level:'moderate',cls:'mod',label:'Moderado',color:'var(--yellow)',score:Math.max(riskScore,35)};
+  return{level:'low',cls:'low',label:'Bajo',color:'var(--green)',score:Math.min(riskScore,30)};
+}
+
+function computeStats(patients){
+  const low=patients.filter(p=>getPatientRisk(p).level==='low').length;
+  const moderate=patients.filter(p=>getPatientRisk(p).level==='moderate').length;
+  const high=patients.filter(p=>getPatientRisk(p).level==='high').length;
+  const adhs=patients.map(p=>getAdherence(p));
+  const avgAdherence=adhs.length?Math.round(adhs.reduce((a,b)=>a+b,0)/adhs.length):0;
+  return{low,moderate,high,avgAdherence};
+}
+
+function getBarriers(p){
+  const map={};
+  p.trackings.forEach(t=>{if(t.q2&&t.q2!=='Otro')map[t.q2]=(map[t.q2]||0)+1;});
+  const total=p.trackings.length||1;
+  return Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([label,count])=>({label,pct:Math.round(count/total*100)}));
+}
+
+function getLearnings(p){
+  return p.trackings.filter(t=>t.q6&&t.q6.trim()).map(t=>t.q6.trim()).slice(-4);
+}
+
+function getEmotionFreq(p){
+  const map={};
+  p.trackings.forEach(t=>{if(t.q3)map[t.q3]=(map[t.q3]||0)+1;});
+  const total=p.trackings.length||1;
+  return Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([label,count])=>({label,pct:Math.round(count/total*100)}));
+}
+
+function detectProfile(p){
+  const avgs=computeAverages(p,8);
+  const barriers=getBarriers(p);
+  const topBarrier=barriers[0]?.label||'';
+  const hasStress=topBarrier==='Estrés'||topBarrier==='Trabajo';
+  const lowEnergy=avgs.energy<5;
+  const lowConf=avgs.conf<5;
+  const highEnv=avgs.env>=7;
+
+  if(lowEnergy&&hasStress)return{
+    name:'Agotamiento silencioso',icon:'🧠',
+    desc:'Sueles dar mucho de ti en tu día a día, lo que puede generar fatiga física y mental sin darte cuenta.',
+    chars:['Altos niveles de estrés y responsabilidad.','Energía fluctuante a lo largo de la semana.','Dificultad para desconectarte y descansar.','Autexigencia elevada.'],
+    strengths:['Comprometido con su crecimiento.','Capacidad de planificación.','Consciente de áreas de mejora.']
+  };
+  if(highEnv&&!lowConf)return{
+    name:'Constructor de hábitos',icon:'🏗️',
+    desc:'Tu entorno favorece tus hábitos y tienes la confianza para mantenerlos a largo plazo.',
+    chars:['Entorno social favorable.','Alta motivación intrínseca.','Constancia en los hábitos.','Capacidad de adaptación.'],
+    strengths:['Red de apoyo sólida.','Claridad en sus objetivos.','Alta adherencia sostenida.']
+  };
+  if(lowConf)return{
+    name:'Aprendiz consciente',icon:'📚',
+    desc:'Eres consciente de tus áreas de mejora y estás en proceso de construir confianza en tus hábitos.',
+    chars:['Autoconciencia elevada.','Buscas mejorar constantemente.','Necesitas más estrategias de soporte.','Confianza en proceso de desarrollo.'],
+    strengths:['Alta conciencia personal.','Disposición al aprendizaje.','Honestidad consigo mismo.']
+  };
+  if(!highEnv&&avgs.env<5)return{
+    name:'Dependiente del entorno',icon:'🌍',
+    desc:'Tu entorno tiene mucho peso sobre tus decisiones. Cuando el ambiente no favorece, es más difícil mantener hábitos.',
+    chars:['Sensibilidad al entorno social.','Hábitos afectados por compromisos externos.','Buena intención pero barreras externas.'],
+    strengths:['Consciente de sus barreras.','Flexible ante los cambios.','Busca adaptarse.']
+  };
+  return{
+    name:'Riesgo de abandono',icon:'⚠️',
+    desc:'Se detectan señales de posible abandono del plan. Es importante reforzar el seguimiento y el soporte.',
+    chars:['Baja adherencia reciente.','Factores externos impactando los hábitos.','Necesita refuerzo motivacional urgente.'],
+    strengths:['Aún sigue en contacto.','Reconoce sus dificultades.','Potencial de recuperación con apoyo.']
+  };
+}
+
+function generateAutoReco(p){
+  const avgs=computeAverages(p,4);
+  const barriers=getBarriers(p);
+  const topBarrier=barriers[0]?.label||'';
+  if(avgs.energy<5&&topBarrier==='Estrés') return 'Trabajar estrategias de recuperación de energía y manejo del estrés. Priorizar el descanso y momentos de autocuidado.';
+  if(avgs.conf<5) return 'Reforzar la confianza del paciente mediante metas pequeñas y alcanzables. Celebrar cada avance.';
+  if(avgs.env<5) return 'Trabajar estrategias de organización alimentaria ante entornos adversos. Planificación anticipada.';
+  if(topBarrier==='Falta de tiempo') return 'Implementar estrategias de preparación de comidas y rutinas cortas pero consistentes.';
+  return 'Mantener el seguimiento actual y profundizar en estrategias de bienestar integral y longevidad.';
+}
+
+function generateRecommendations(p){
+  const avgs=computeAverages(p,4);
+  const barriers=getBarriers(p);
+  const top=barriers[0]?.label||'';
+  const recos=[];
+  if(avgs.energy<6) recos.push({icon:'⚡',title:'Optimiza tu energía',text:'Prioriza 7-8 horas de sueño por noche. Una rutina de sueño consistente mejora significativamente la energía y las decisiones alimentarias.'});
+  if(top==='Estrés'||top==='Trabajo') recos.push({icon:'🧘',title:'Manejo del estrés',text:'Incorpora 10-15 minutos diarios de respiración o meditación. El estrés crónico afecta directamente tu relación con la comida.'});
+  if(avgs.conf<6) recos.push({icon:'🎯',title:'Construye confianza gradual',text:'Establece metas pequeñas y específicas para esta semana. Cada pequeño logro construye momentum y confianza a largo plazo.'});
+  if(top==='Falta de tiempo') recos.push({icon:'📅',title:'Planificación semanal',text:'Dedica 30 minutos el domingo para preparar o planear tus comidas de la semana. La anticipación reduce el 80% de las decisiones impulsivas.'});
+  if(avgs.env<6) recos.push({icon:'🌱',title:'Adapta tu entorno',text:'Identifica los momentos de mayor vulnerabilidad en tu entorno y prepara estrategias específicas para esos contextos.'});
+  if(!recos.length) recos.push({icon:'✅',title:'Mantén el rumbo',text:'Estás en una excelente racha. Continúa con tus hábitos actuales y sigue registrando tu progreso semanalmente.'});
+  return recos;
+}
+
+// ════════════════════════════════
+// HELPERS
+// ════════════════════════════════
+function formatDate(d){
+  if(!d)return'';
+  const parts=d.split('-');
+  const months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return `${parseInt(parts[2])} ${months[parseInt(parts[1])-1]} ${parts[0]}`;
+}
+function formatRelDate(d){
+  const diff=Math.floor((new Date()-new Date(d))/86400000);
+  if(diff===0)return'Hoy';if(diff===1)return'Ayer';if(diff<7)return`Hace ${diff} días`;return'Hace más de 1 semana';
+}
+function stringToColor(str){
+  let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+((h<<5)-h);
+  const s=65,l=45;
+  const hue=((h%360)+360)%360;
+  return`hsl(${hue},${s}%,${l}%)`;
+}
+function emoColor(e){
+  const map={Motivación:'#16A34A',Tranquilidad:'#059669',Ansiedad:'#D97706',Estrés:'#E10600',Frustración:'#D97706',Culpa:'#DC2626',Tristeza:'#6B7280'};
+  return map[e]||'#999';
+}
+
+// ════════════════════════════════
+// PDF EXPORT (basic print)
+// ════════════════════════════════
+function exportPatientPDF(id){
+  const p=getPatient(id);
+  if(!p)return;
+  const avgs=computeAverages(p,8);
+  const vit=computeVitality(p);
+  const risk=getPatientRisk(p);
+  const profile=detectProfile(p);
+  const recos=generateRecommendations(p);
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Reporte – ${p.name}</title>
+  <style>body{font-family:'DM Sans',Arial,sans-serif;margin:40px;color:#1a1a1a;font-size:14px}
+  h1{font-size:24px;font-weight:800;margin-bottom:4px}h2{font-size:18px;font-weight:700;margin:24px 0 8px;color:#E10600}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #E10600;padding-bottom:16px;margin-bottom:24px}
+  .brand{font-size:12px;color:#999;text-align:right}.metric{display:inline-block;background:#f5f5f5;border-radius:8px;padding:10px 16px;margin:4px;text-align:center}
+  .metric .val{font-size:22px;font-weight:800}.metric .lbl{font-size:11px;color:#555}
+  .reco{background:#fef2f2;border-left:4px solid #E10600;padding:10px 14px;margin:8px 0;border-radius:0 8px 8px 0}
+  table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#0D0D0D;color:#fff;padding:8px 12px;text-align:left;font-size:12px}
+  td{padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:13px}
+  </style></head><body>
+  <div class="header"><div><div style="font-size:11px;color:#E10600;font-weight:700;letter-spacing:1px;text-transform:uppercase">INSTINTO DISRUPTIVO</div><h1>${p.name}</h1><div style="color:#555;font-size:13px">${p.age?p.age+' años · ':''} ${p.gender||''} ${p.phone?'· '+p.phone:''}</div></div><div class="brand">Radar Semanal<br>Reporte generado: ${new Date().toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'})}<br>Nutriólogo: Jerson Torres</div></div>
+  <h2>Métricas generales</h2>
+  <div class="metric"><div class="val">${vit}/100</div><div class="lbl">Índice de Vitalidad</div></div>
+  <div class="metric"><div class="val">${avgs.energy}/10</div><div class="lbl">Energía promedio</div></div>
+  <div class="metric"><div class="val">${avgs.env}/10</div><div class="lbl">Entorno promedio</div></div>
+  <div class="metric"><div class="val">${avgs.conf}/10</div><div class="lbl">Confianza promedio</div></div>
+  <div class="metric"><div class="val" style="color:${risk.color}">${risk.label}</div><div class="lbl">Riesgo de abandono</div></div>
+  <div class="metric"><div class="val">${p.trackings.length}</div><div class="lbl">Seguimientos</div></div>
+  <h2>Perfil conductual</h2>
+  <p><strong>${profile.icon} ${profile.name}</strong><br>${profile.desc}</p>
+  <h2>Recomendaciones</h2>
+  ${recos.map(r=>`<div class="reco"><strong>${r.icon} ${r.title}</strong><br>${r.text}</div>`).join('')}
+  <h2>Historial de seguimientos</h2>
+  <table><thead><tr><th>Fecha</th><th>Energía</th><th>Entorno</th><th>Confianza</th><th>Emoción</th><th>Barrera</th></tr></thead><tbody>
+  ${[...p.trackings].reverse().map(t=>`<tr><td>${formatDate(t.date)}</td><td>${t.q4}/10</td><td>${t.q5}/10</td><td>${t.q7}/10</td><td>${t.q3||'—'}</td><td>${t.q2||'—'}</td></tr>`).join('')}
+  </tbody></table>
+  <p style="margin-top:40px;font-size:11px;color:#aaa;text-align:center">© Instinto Disruptivo · Jerson Torres · Nutriólogo · Información confidencial del paciente</p>
+  </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(),400);
+}
+
+// ════════════════════════════════
+// MOBILE UI
+// ════════════════════════════════
+function toggleMobileSidebar(){
+  const sidebar = document.querySelector('.sidebar:not([style*="display:none"])') ||
+                  document.getElementById('admin-sidebar').style.display!=='none' ? document.getElementById('admin-sidebar') :
+                  document.getElementById('patient-sidebar').style.display!=='none' ? document.getElementById('patient-sidebar') :
+                  document.getElementById('tracking-sidebar-inner');
+  // find active visible sidebar
+  const sidebars = [
+    document.getElementById('admin-sidebar'),
+    document.getElementById('patient-sidebar'),
+    document.getElementById('tracking-sidebar-inner')
+  ];
+  const active = sidebars.find(s => s && s.style.display !== 'none' && s.style.display !== '');
+  if(active){
+    active.classList.toggle('open');
+    const isOpen = active.classList.contains('open');
+    const ov = document.querySelector('.mobile-overlay');
+    if(ov){ov.style.display = isOpen ? 'block' : 'none'; ov.style.pointerEvents = isOpen ? 'auto' : 'none';}
+  }
+}
+function closeMobileSidebar(){
+  document.querySelectorAll('.sidebar').forEach(s=>s.classList.remove('open'));
+  const ov=document.querySelector('.mobile-overlay');
+  if(ov){ov.style.display='none';ov.style.pointerEvents='none';}
+}
+function setupMobileTopbar(){
+  const topbar=document.querySelector('.mobile-topbar');
+  if(!topbar)return;
+  // Set logo
+  const logoImg=document.querySelector('.sidebar img[style*="border-radius:50%"]');
+  const mobileLogoEl=document.getElementById('mobile-topbar-logo');
+  if(logoImg&&mobileLogoEl) mobileLogoEl.src=logoImg.src;
+  // Show/hide based on viewport
+  const isMobile=window.innerWidth<=768;
+  topbar.style.display=isMobile?'flex':'none';
+}
+window.addEventListener('resize',setupMobileTopbar);
+
+// ════════════════════════════════
+// SYNC
+// ════════════════════════════════
+function forceSync(){
+  _dbCache=null;
+  localStorage.removeItem(LOCAL_CACHE_KEY);
+  showLoading('Sincronizando con la nube...');
+  fetchDB();
+  renderPatients();
+}
 
 // ════════════════════════════════
 // START
 // ════════════════════════════════
-window.addEventListener('DOMContentLoaded', init);
+window.addEventListener('DOMContentLoaded',init);
 </script>
 </body>
 </html>
