@@ -30,14 +30,14 @@
   --shadow-md:0 4px 24px rgba(0,0,0,0.10);
 }
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:#fff}
+html,body{height:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:#ffffff!important}
 h1,h2,h3,h4{font-weight:700}
 a{text-decoration:none;color:inherit}
 button{cursor:pointer;font-family:inherit}
 input,textarea,select{font-family:inherit}
 
 /* ─── LAYOUT ─── */
-#app{display:flex;height:100vh;overflow:hidden;background:#fff}
+#app{display:flex;height:100vh;overflow:hidden;background:#ffffff!important}
 .sidebar{
   width:var(--sidebar-w);min-width:var(--sidebar-w);
   background:var(--black);
@@ -349,8 +349,8 @@ textarea.form-control{resize:vertical;min-height:80px}
 .success-sub{font-size:15px;color:var(--text2);max-width:360px;line-height:1.6}
 
 /* ─── LOGIN ─── */
-#page-login{background:#ffffff!important;align-items:center;justify-content:center;min-height:100vh;width:100%;position:relative;z-index:1}
-.login-card{background:#ffffff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.12);padding:40px;width:100%;max-width:380px;text-align:center;position:relative;z-index:1}
+#page-login{position:fixed!important;inset:0!important;background:#f7f7f7!important;align-items:center!important;justify-content:center!important;z-index:50!important;overflow-y:auto!important}
+.login-card{background:#ffffff!important;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.12);padding:40px;width:calc(100% - 32px);max-width:380px;text-align:center;position:relative;z-index:2}
 .login-logo{width:70px;height:70px;border-radius:50%;background:var(--black);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
 .login-title{font-size:20px;font-weight:800;margin-bottom:4px}
 .login-sub{font-size:13px;color:var(--text2);margin-bottom:24px}
@@ -1350,12 +1350,24 @@ async function init(){
 }
 
 function showPage(id){
-  document.querySelectorAll('#app > .page').forEach(p=>p.style.display='none');
+  document.querySelectorAll('#app > .page').forEach(p=>{
+    p.style.display='none';
+    p.style.position='';
+  });
   document.getElementById('admin-sidebar').style.display='none';
   document.getElementById('patient-sidebar').style.display='none';
   closeMobileSidebar();
   const el=document.getElementById(id);
-  if(el){el.style.display='flex';}
+  if(el){
+    el.style.display='flex';
+    // On mobile, make login/register fill the whole screen properly
+    if(window.innerWidth<=768 && (id==='page-login'||id==='page-register')){
+      el.style.position='fixed';
+      el.style.inset='0';
+      el.style.zIndex='50';
+      el.style.background='#f7f7f7';
+    }
+  }
   // Show mobile topbar on all pages except register/login
   const topbar=document.querySelector('.mobile-topbar');
   if(topbar){
