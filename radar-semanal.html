@@ -350,7 +350,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 
 /* ─── LOGIN ─── */
 #page-login{position:fixed!important;inset:0!important;background:#f7f7f7!important;align-items:center!important;justify-content:center!important;z-index:50!important;overflow-y:auto!important}
-.login-card{background:#ffffff!important;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.12);padding:40px;width:calc(100% - 32px);max-width:380px;text-align:center;position:relative;z-index:2}
+.login-card{background:#ffffff!important;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.12);padding:32px 24px;width:calc(100% - 32px);max-width:400px;text-align:center;position:relative;z-index:300}
 .login-logo{width:70px;height:70px;border-radius:50%;background:var(--black);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
 .login-title{font-size:20px;font-weight:800;margin-bottom:4px}
 .login-sub{font-size:13px;color:var(--text2);margin-bottom:24px}
@@ -494,7 +494,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   #page-login {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 200 !important;
+    z-index: 999 !important;
     background: #f7f7f7 !important;
     display: flex !important;
     align-items: center !important;
@@ -513,7 +513,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   #page-register {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 200 !important;
+    z-index: 999 !important;
   }
   .register-left { display: none !important; }
   .register-right { width: 100% !important; padding: 24px 20px !important; }
@@ -620,7 +620,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 <div id="app">
 
 <!-- MOBILE TOPBAR -->
-<div class="mobile-topbar" id="mobile-topbar" style="display:none;position:fixed;top:0;left:0;right:0;height:56px;background:var(--black);z-index:150;align-items:center;padding:0 16px;gap:12px;border-bottom:2px solid var(--black3)">
+<div class="mobile-topbar" id="mobile-topbar" style="display:none;position:fixed;top:0;left:0;right:0;height:56px;background:var(--black);z-index:10;align-items:center;padding:0 16px;gap:12px;border-bottom:2px solid var(--black3)">
   <button onclick="toggleMobileSidebar()" style="background:none;border:none;color:#fff;padding:4px;display:flex;align-items:center;justify-content:center;cursor:pointer">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
@@ -1354,35 +1354,14 @@ let deleteTarget = null;
 
 async function init(){
   buildScales();
-  // Hide topbar initially
+  // Always start at login - hide topbar completely
   const tb=document.getElementById('mobile-topbar');
   if(tb){tb.style.display='none';tb.style.pointerEvents='none';}
-  showPage('page-login'); // show something immediately
-  await fetchDB(); // load from JSONBin
-  const session = sessionStorage.getItem('radar_session');
-  if(session){
-    const s = JSON.parse(session);
-    if(s.role==='admin'){
-      currentRole='admin';
-      showAdminUI();
-      showAdminPage('patients');
-      return;
-    } else if(s.role==='patient'){
-      currentRole='patient';
-      currentPatientId=s.patientId;
-      const p=getPatient(s.patientId);
-      if(p){
-        updatePatientSidebar(p);
-        showPatientPage('tracking');
-        return;
-      } else {
-        // Patient not in cache, clear session
-        sessionStorage.removeItem('radar_session');
-      }
-    }
-  }
+  // Clear any old session to prevent topbar blocking login
+  sessionStorage.removeItem('radar_session');
   showPage('page-login');
-  setupMobileTopbar();
+  // Fetch DB in background - don't block UI
+  fetchDB();
 }
 
 function showPage(id){
