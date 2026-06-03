@@ -1200,85 +1200,102 @@ function setAdminPw(pw){localStorage.setItem(ADMIN_PW_KEY,pw);}
 
 // Show/hide loading overlay
 function showLoading(msg){
-  let el=document.getElementById('loading-overlay');
+  // Only show a small non-blocking toast, never a full blur overlay
+  let el=document.getElementById('loading-toast');
   if(!el){
     el=document.createElement('div');
-    el.id='loading-overlay';
-    el.style.cssText='position:fixed;inset:0;background:rgba(255,255,255,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;backdrop-filter:blur(4px)';
-    el.innerHTML=`<div style="width:40px;height:40px;border:3px solid #f0f0f0;border-top-color:#E10600;border-radius:50%;animation:spin .7s linear infinite"></div><div style="font-size:14px;font-weight:600;color:#555" id="loading-msg">Cargando...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+    el.id='loading-toast';
+    el.style.cssText='position:fixed;bottom:20px;right:20px;background:#1a1a1a;color:#fff;padding:10px 16px;border-radius:10px;z-index:9999;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:opacity .3s';
+    el.innerHTML=`<div style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#E10600;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div><span id="loading-msg">Guardando...</span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
     document.body.appendChild(el);
   }
-  document.getElementById('loading-msg').textContent=msg||'Cargando...';
+  document.getElementById('loading-msg').textContent=msg||'Guardando...';
+  el.style.opacity='1';
   el.style.display='flex';
 }
 function hideLoading(){
-  const el=document.getElementById('loading-overlay');
-  if(el)el.style.display='none';
+  const el=document.getElementById('loading-toast');
+  if(el){el.style.opacity='0';setTimeout(()=>{el.style.display='none';},300);}
 }
 
 async function fetchDB(){
+  // Always return immediately from cache - never block the UI
   if(_dbCache) return _dbCache;
+  // Load local cache instantly
   try{
     const cached=localStorage.getItem(LOCAL_CACHE_KEY);
-    if(cached){_dbCache=JSON.parse(cached);}
+    if(cached) _dbCache=JSON.parse(cached);
   }catch(e){}
-  showLoading('Sincronizando datos...');
-  try{
-    const res=await fetch(JSONBIN_URL+'/latest',{
-      method:'GET',
-      mode:'cors',
-      headers:{
-        'X-Master-Key':JSONBIN_KEY,
-        'X-Bin-Meta':'false',
-        'Content-Type':'application/json'
-      }
-    });
+  if(!_dbCache) _dbCache={patients:[],currentPatientId:null};
+  // Sync with JSONBin in background (don't await, don't block)
+  syncWithCloud();
+  return _dbCache;
+}
+
+function syncWithCloud(){
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),8000); // 8s timeout
+  fetch(JSONBIN_URL+'/latest',{
+    method:'GET',
+    mode:'cors',
+    signal:controller.signal,
+    headers:{
+      'X-Master-Key':JSONBIN_KEY,
+      'X-Bin-Meta':'false'
+    }
+  })
+  .then(res=>{
+    clearTimeout(timeout);
     if(!res.ok) throw new Error('HTTP '+res.status);
-    const data=await res.json();
-    _dbCache=data&&data.patients!==undefined?data:{patients:[],currentPatientId:null};
-    if(!_dbCache.patients)_dbCache.patients=[];
-    localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(_dbCache));
-    hideLoading();
-    return _dbCache;
-  }catch(e){
-    console.warn('JSONBin fetch failed, using local cache',e);
-    if(!_dbCache)_dbCache={patients:[],currentPatientId:null};
-    hideLoading();
-    return _dbCache;
-  }
+    return res.json();
+  })
+  .then(data=>{
+    if(data&&data.patients!==undefined){
+      _dbCache=data;
+      if(!_dbCache.patients)_dbCache.patients=[];
+      localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(_dbCache));
+      // Refresh current view silently if on admin pages
+      if(currentRole==='admin'){
+        const activePage=document.querySelector('.page[style*="flex"]:not([style*="display:none"])');
+        if(activePage&&activePage.id==='page-patients') renderPatients();
+      }
+    }
+  })
+  .catch(e=>console.log('Cloud sync skipped:',e.message));
 }
 
 async function saveDB(db){
+  // Save locally instantly
   _dbCache=db;
   localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(db));
-  try{
-    const res=await fetch(JSONBIN_URL,{
-      method:'PUT',
-      mode:'cors',
-      headers:{
-        'Content-Type':'application/json',
-        'X-Master-Key':JSONBIN_KEY
-      },
-      body:JSON.stringify(db)
-    });
-    if(!res.ok) throw new Error('Save HTTP '+res.status);
-    return true;
-  }catch(e){
-    console.warn('JSONBin save failed',e);
-    // Retry once after 1 second
-    await new Promise(r=>setTimeout(r,1000));
-    try{
-      await fetch(JSONBIN_URL,{
-        method:'PUT',
-        mode:'cors',
-        headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},
-        body:JSON.stringify(db)
-      });
-    }catch(e2){
-      console.warn('JSONBin retry also failed',e2);
+  // Push to cloud with retries, but don't block the UI
+  pushToCloud(JSON.stringify(db));
+  return true;
+}
+
+function pushToCloud(jsonStr, attempt){
+  attempt=attempt||1;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),10000);
+  fetch(JSONBIN_URL,{
+    method:'PUT',
+    mode:'cors',
+    signal:controller.signal,
+    headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},
+    body:jsonStr
+  })
+  .then(res=>{
+    clearTimeout(timeout);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    console.log('Cloud save OK');
+  })
+  .catch(e=>{
+    clearTimeout(timeout);
+    console.log('Cloud save attempt '+attempt+' failed:',e.message);
+    if(attempt<3){
+      setTimeout(()=>pushToCloud(jsonStr, attempt+1), attempt*2000);
     }
-    return false;
-  }
+  });
 }
 
 function getDB(){return _dbCache||{patients:[],currentPatientId:null};}
