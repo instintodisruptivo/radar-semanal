@@ -1187,7 +1187,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 // ════════════════════════════════
 const JSONBIN_KEY = '$2a$10$BrnZWuxT2YyfLsKS36oe9eLP0NIhLIZxgLInqlL8J1P/nuqD4bwqK';
 const JSONBIN_BIN = '6a1fe321da38895dfe7fa87f';
-const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN}`;
+const JSONBIN_URL = 'https://api.jsonbin.io/v3/b/'+JSONBIN_BIN;
 const ADMIN_PW_KEY = 'radar_admin_pw';
 const LOCAL_CACHE_KEY = 'radar_cache_v1';
 
@@ -1217,42 +1217,67 @@ function hideLoading(){
 }
 
 async function fetchDB(){
-  // Return cache if available
   if(_dbCache) return _dbCache;
-  // Try local cache first for speed
   try{
     const cached=localStorage.getItem(LOCAL_CACHE_KEY);
-    if(cached){_dbCache=JSON.parse(cached);} 
+    if(cached){_dbCache=JSON.parse(cached);}
   }catch(e){}
   showLoading('Sincronizando datos...');
   try{
     const res=await fetch(JSONBIN_URL+'/latest',{
-      headers:{'X-Master-Key':JSONBIN_KEY,'X-Bin-Meta':'false'}
+      method:'GET',
+      mode:'cors',
+      headers:{
+        'X-Master-Key':JSONBIN_KEY,
+        'X-Bin-Meta':'false',
+        'Content-Type':'application/json'
+      }
     });
-    if(!res.ok) throw new Error('Fetch failed: '+res.status);
+    if(!res.ok) throw new Error('HTTP '+res.status);
     const data=await res.json();
-    _dbCache=data.patients!==undefined?data:{patients:[],currentPatientId:null};
+    _dbCache=data&&data.patients!==undefined?data:{patients:[],currentPatientId:null};
     if(!_dbCache.patients)_dbCache.patients=[];
     localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(_dbCache));
+    hideLoading();
+    return _dbCache;
   }catch(e){
     console.warn('JSONBin fetch failed, using local cache',e);
     if(!_dbCache)_dbCache={patients:[],currentPatientId:null};
+    hideLoading();
+    return _dbCache;
   }
-  hideLoading();
-  return _dbCache;
 }
 
 async function saveDB(db){
   _dbCache=db;
   localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(db));
   try{
-    await fetch(JSONBIN_URL,{
+    const res=await fetch(JSONBIN_URL,{
       method:'PUT',
-      headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},
+      mode:'cors',
+      headers:{
+        'Content-Type':'application/json',
+        'X-Master-Key':JSONBIN_KEY
+      },
       body:JSON.stringify(db)
     });
+    if(!res.ok) throw new Error('Save HTTP '+res.status);
+    return true;
   }catch(e){
-    console.warn('JSONBin save failed, data in local cache only',e);
+    console.warn('JSONBin save failed',e);
+    // Retry once after 1 second
+    await new Promise(r=>setTimeout(r,1000));
+    try{
+      await fetch(JSONBIN_URL,{
+        method:'PUT',
+        mode:'cors',
+        headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},
+        body:JSON.stringify(db)
+      });
+    }catch(e2){
+      console.warn('JSONBin retry also failed',e2);
+    }
+    return false;
   }
 }
 
