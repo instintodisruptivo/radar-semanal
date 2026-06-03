@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Radar Semanal – Instinto Disruptivo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
@@ -423,152 +423,185 @@ textarea.form-control{resize:vertical;min-height:80px}
 
 /* ─── RESPONSIVE ─── */
 
-/* Tablet landscape */
-@media(max-width:1100px){
-  .analysis-grid{grid-template-columns:1fr 1fr}
-  .charts-grid{grid-template-columns:1fr}
-  .charts-grid .chart-card:first-child{grid-column:span 1}
-}
+/* Force single column on ALL mobile screens */
+@media screen and (max-width: 900px) {
 
-/* Tablet portrait */
-@media(max-width:900px){
-  .analysis-grid{grid-template-columns:1fr}
-  .questions-grid{grid-template-columns:1fr 1fr}
-  .q-card.full-width{grid-column:span 2}
-  .q-card[style*="span 2"]{grid-column:span 2}
-  .charts-grid{grid-template-columns:1fr}
-  .charts-grid .chart-card:first-child{grid-column:span 1}
-  .page{padding:20px 18px}
-  .tracking-main{padding:20px 18px}
-}
-
-/* Mobile — all screens under 768px */
-@media(max-width:768px){
-  /* Hide sidebar on mobile, show hamburger instead */
-  .sidebar{
-    position:fixed;left:-100%;top:0;height:100vh;z-index:200;
-    transition:left .25s ease;width:260px!important;min-width:260px!important;
+  /* QUESTIONS: always 1 column on mobile */
+  .questions-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
   }
-  .sidebar.open{left:0}
-  .mobile-overlay{display:block!important}
+  .q-card {
+    width: 100% !important;
+    grid-column: unset !important;
+  }
+
+  /* Fix tracking page layout */
+  #page-tracking {
+    flex-direction: column !important;
+  }
+  .tracking-sidebar {
+    display: none !important;
+  }
+  .tracking-main {
+    padding: 70px 14px 20px !important;
+    overflow-y: auto !important;
+    flex: 1 !important;
+  }
+
+  /* Hide desktop sidebars, show hamburger */
+  #admin-sidebar,
+  #patient-sidebar {
+    position: fixed !important;
+    left: -100% !important;
+    top: 0 !important;
+    height: 100vh !important;
+    z-index: 200 !important;
+    transition: left .25s ease !important;
+    width: 260px !important;
+    min-width: 260px !important;
+  }
+  #admin-sidebar.open,
+  #patient-sidebar.open {
+    left: 0 !important;
+  }
 
   /* Show mobile topbar */
-  .mobile-topbar{display:flex!important}
-
-  /* Main content takes full width */
-  #app{flex-direction:column}
-  .main{width:100%}
-  .page{padding:16px 14px;padding-top:68px}
-
-  /* Tracking page layout */
-  #page-tracking{flex-direction:column}
-  .tracking-sidebar{display:none!important}
-  .tracking-main{padding:16px 14px;padding-top:68px}
-
-  /* Questions: 1 column on mobile */
-  .questions-grid{
-    grid-template-columns:1fr!important;
-    gap:12px;
+  .mobile-topbar {
+    display: flex !important;
   }
-  .q-card{grid-column:span 1!important}
-  .q-card.full-width{grid-column:span 1!important}
 
-  /* Scale buttons smaller */
-  .scale-btn{width:34px;height:34px;font-size:13px}
-  .scale-row{gap:4px}
+  /* Main content full width */
+  #app {
+    flex-direction: column !important;
+  }
+  .main {
+    width: 100% !important;
+    flex: 1 !important;
+  }
 
-  /* Radio grid 2 cols on mobile */
-  .radio-grid{grid-template-columns:1fr 1fr!important}
-  .radio-grid.cols2{grid-template-columns:1fr 1fr!important}
+  /* Pages padding for topbar */
+  .page {
+    padding-top: 70px !important;
+  }
+  #page-login,
+  #page-register {
+    padding-top: 0 !important;
+  }
+
+  /* Login full screen */
+  #page-login {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 50 !important;
+    background: #f7f7f7 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow-y: auto !important;
+    padding: 20px !important;
+  }
+  .login-card {
+    width: 100% !important;
+    max-width: 400px !important;
+    background: #fff !important;
+    padding: 28px 20px !important;
+  }
+
+  /* Register full screen */
+  #page-register {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 50 !important;
+  }
+  .register-left { display: none !important; }
+  .register-right { width: 100% !important; padding: 24px 20px !important; }
+  .register-form-card { padding: 24px 18px !important; }
 
   /* Stats row */
-  .stats-row{flex-wrap:wrap;gap:10px}
-  .stat-card{min-width:calc(50% - 5px);flex:none}
+  .stats-row {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+  .stat-card {
+    min-width: calc(50% - 5px) !important;
+    flex: none !important;
+  }
 
-  /* Table horizontal scroll */
-  .table-wrap{overflow-x:auto}
-  .table-header,.table-row{
-    grid-template-columns:1.8fr 1fr 1fr 80px 70px;
-    min-width:560px;
-    padding:10px 14px;
-    gap:8px;
+  /* Table scroll */
+  .table-wrap { overflow-x: auto !important; }
+  .table-header, .table-row {
+    min-width: 540px !important;
+    padding: 10px 12px !important;
   }
 
   /* Profile */
-  .profile-header{flex-direction:column;gap:14px}
-  .profile-stats{margin-left:0;flex-direction:row;flex-wrap:wrap}
-  .mini-stat-card{min-width:140px;flex:1}
+  .profile-header { flex-direction: column !important; }
+  .profile-stats { margin-left: 0 !important; flex-wrap: wrap !important; }
+  .mini-stat-card { flex: 1 !important; min-width: 140px !important; }
 
   /* Metric cards */
-  .metric-cards{flex-wrap:wrap}
-  .metric-card{min-width:calc(50% - 6px);flex:none}
+  .metric-cards { flex-wrap: wrap !important; }
+  .metric-card { min-width: calc(50% - 6px) !important; flex: none !important; }
 
-  /* Charts grid */
-  .charts-grid,.dashboard-charts{grid-template-columns:1fr!important}
-  .charts-grid .chart-card:first-child{grid-column:span 1!important}
+  /* Charts */
+  .charts-grid,
+  .dashboard-charts { grid-template-columns: 1fr !important; }
 
-  /* Analysis grid */
-  .analysis-grid{grid-template-columns:1fr!important}
+  /* Analysis */
+  .analysis-grid { grid-template-columns: 1fr !important; }
 
-  /* Profile tabs scrollable */
-  .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
-  .tab{white-space:nowrap;flex-shrink:0;padding:10px 14px;font-size:13px}
+  /* Tabs */
+  .tabs { overflow-x: auto !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch !important; }
+  .tab { white-space: nowrap !important; flex-shrink: 0 !important; }
 
   /* Page header */
-  .page-header{flex-direction:column;align-items:flex-start;gap:12px}
-  .header-actions{flex-wrap:wrap;width:100%}
-  .header-actions .btn{flex:1;min-width:120px;justify-content:center}
-  .search-bar{min-width:100%}
+  .page-header { flex-direction: column !important; align-items: flex-start !important; }
+  .header-actions { flex-wrap: wrap !important; width: 100% !important; }
+  .search-bar { min-width: 100% !important; }
 
   /* Submit button */
-  .submit-btn{min-width:0!important;width:100%;padding:14px 20px;font-size:14px}
-  .submit-row{padding:16px 0}
+  .submit-btn { width: 100% !important; min-width: 0 !important; }
 
-  /* Register page */
-  .register-wrap{flex-direction:column}
-  .register-left{display:none}
-  .register-right{width:100%;padding:24px 20px;min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .register-form-card{padding:28px 20px}
+  /* Scale buttons */
+  .scale-btn { width: 32px !important; height: 32px !important; font-size: 12px !important; }
+  .scale-row { gap: 4px !important; flex-wrap: wrap !important; justify-content: center !important; }
 
-  /* Modal */
-  .modal{padding:24px 18px;margin:10px}
-  .modal-overlay{padding:10px}
+  /* Radio grid */
+  .radio-grid { grid-template-columns: 1fr 1fr !important; }
 
-  /* Tracking header */
-  .tracking-app-name{font-size:28px}
-  .progress-track{font-size:12px}
-  .progress-track-bar{max-width:120px}
-
-  /* Patient profile section grids */
-  div[style*="grid-template-columns:1.5fr 1fr"]{
-    display:flex!important;flex-direction:column!important;gap:12px!important;
+  /* Override any inline grid styles in profile */
+  [style*="grid-template-columns:1.5fr 1fr"],
+  [style*="grid-template-columns: 1.5fr 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
   }
-  div[style*="grid-template-columns:1fr 1fr 1fr"]{
-    display:flex!important;flex-direction:column!important;gap:12px!important;
+  [style*="grid-template-columns:1fr 1fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
   }
-  div[style*="grid-template-columns:1fr 1fr"]{
-    display:flex!important;flex-direction:column!important;gap:12px!important;
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
   }
-
-  /* Login card */
-  .login-card{padding:28px 20px;margin:16px}
-
-  /* Summary recent */
-  .summary-scores{gap:8px}
-  .summary-score{min-width:50px}
 
   /* Page title */
-  .page-title h2{font-size:20px}
+  .page-title h2 { font-size: 20px !important; }
+  .tracking-app-name { font-size: 26px !important; }
+
+  /* Modal */
+  .modal { padding: 22px 16px !important; margin: 10px !important; }
+  .modal-overlay { padding: 10px !important; }
 }
 
-/* Small mobile under 420px */
-@media(max-width:420px){
-  .scale-btn{width:30px;height:30px;font-size:12px}
-  .metric-card{min-width:calc(50% - 6px)}
-  .stat-card{min-width:calc(50% - 5px)}
-  .radio-grid{grid-template-columns:1fr 1fr!important}
-  .page{padding:14px 12px;padding-top:64px}
-  .tracking-main{padding:14px 12px;padding-top:64px}
+/* Extra small screens */
+@media screen and (max-width: 390px) {
+  .scale-btn { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+  .radio-grid { grid-template-columns: 1fr !important; }
+  .metric-card { min-width: 100% !important; }
 }
 
 /* ─── SCROLLBAR ─── */
